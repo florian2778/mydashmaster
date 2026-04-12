@@ -45,6 +45,9 @@ data/
 layouts/
 devices/
 device-auth/
+- stores authentication data per device
+- contains hash(deviceSecret)
+- may contain candidateSecretHash for pending devices
 users/
 
 ---
@@ -74,16 +77,28 @@ Boxes define iframe content:
 A device:
 - has a unique code
 - has a status (pending, approved, revoked)
+  - pending: device not yet approved
+  - approved: device allowed with valid secret
+  - revoked: device explicitly blocked, requires re-approval
 - is assigned exactly one layout
 
 ---
 
 ## Device Authorization
 
-- token-based authentication
-- token stored in cookie
-- token stored hashed on server
-- no access without valid token
+- authentication is based on a device-specific secret
+- each device generates a persistent deviceSecret (client-side)
+- server stores only hash(deviceSecret)
+- deviceSecret is the primary authentication factor
+
+- a cookie is used as a temporary validated session
+- cookie does not replace deviceSecret authentication
+- cookie can be revalidated using deviceSecret
+
+- access requires:
+  - valid deviceCode (routing only)
+  - device status = approved
+  - valid deviceSecret (or valid session cookie)
 
 ---
 
@@ -91,9 +106,13 @@ A device:
 
 1. Device calls `/d/{deviceCode}`
 2. Server loads device
-3. Server validates token
-4. If not valid → pending page
-5. If valid → render layout
+3. Server checks device status
+4. If not approved → pending page
+5. If approved:
+   - validate session cookie if present
+   - otherwise validate deviceSecret
+6. If validation fails → pending / not authorized
+7. If validation succeeds → render layout
 
 ---
 

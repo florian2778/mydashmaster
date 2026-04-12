@@ -27,6 +27,15 @@ The layout structure is a recursive tree of nodes:
 
 Path: data/devices/{deviceCode}.json
 
+status can be:
+- pending
+- approved
+- revoked
+
+- pending: device is registered but not yet approved
+- approved: device is allowed to access layout with valid authentication
+- revoked: device access is explicitly disabled
+
 Example:
 
 {
@@ -211,3 +220,43 @@ Each layout should have:
 - preview graphic (approx. 240x135 px)
 - layoutId display
 - validation status (valid / warning / error)
+
+## Device Authentication Lifecycle
+
+- On first contact:
+  - client sends deviceSecret
+  - server stores candidateSecretHash
+
+- On approval:
+  - candidateSecretHash becomes secretHash
+  - candidateSecretHash may be removed
+
+- On authentication:
+  - hash(deviceSecret) must match secretHash
+
+- On revocation:
+  - secretHash is removed or invalidated
+  - device loses access immediately
+  
+  ---
+  
+  ## Device Authentication Lifecycle
+  
+  - On first contact:
+    - client sends deviceSecret
+    - server stores candidateSecretHash
+  
+  - On approval:
+    - candidateSecretHash becomes secretHash
+    - candidateSecretHash may be removed
+  
+  - On authentication:
+    - hash(deviceSecret) must match secretHash
+  
+  - On revocation:
+    - secretHash is removed or invalidated
+    - device loses access immediately
+    
+    
+  The plain deviceSecret is never stored on the server.
+  Only a one-way hash is persisted.
