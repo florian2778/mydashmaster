@@ -1,0 +1,89 @@
+<%- include("../partials/header") %>
+
+<section class="panel">
+  <header class="admin-layouts-header">
+    <div>
+      <p class="admin-layouts-eyebrow">Admin</p>
+      <h1><%= heading %></h1>
+      <p class="admin-layouts-subtitle">
+        Registered devices, their status, and approval controls.
+      </p>
+    </div>
+    <a class="admin-secondary-link" href="/admin">Back to admin</a>
+  </header>
+
+  <section class="admin-device-create">
+    <div>
+      <h2>Create Device</h2>
+      <p class="admin-layouts-subtitle">
+        Generate a new pending device code for onboarding.
+      </p>
+    </div>
+
+    <form class="admin-device-create-form" action="/admin/devices" method="post">
+      <label>
+        <span>Layout</span>
+        <select name="layoutId">
+          <option value="">No layout assigned</option>
+          <% layouts.forEach((layout) => { %>
+            <option value="<%= layout.layoutId %>"><%= layout.layoutId %></option>
+          <% }) %>
+        </select>
+      </label>
+      <button class="admin-action-button" type="submit">Create Device</button>
+    </form>
+  </section>
+
+  <% if (devices.length === 0) { %>
+    <p>No device JSON files found in <code>data/devices/</code>.</p>
+  <% } else { %>
+    <section class="device-overview-list">
+      <% devices.forEach((device) => { %>
+        <article class="device-overview-card">
+          <div class="device-overview-meta">
+            <div class="layout-overview-topline">
+              <h2><%= device.deviceCode %></h2>
+              <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
+                <%= device.status %>
+              </span>
+            </div>
+
+            <div class="device-overview-facts">
+              <span>Layout: <%= device.layoutId || "none" %></span>
+              <span>
+                Link:
+                <a href="/d/<%= device.deviceCode %>"><code>/d/<%= device.deviceCode %></code></a>
+              </span>
+              <span>Last IP: <%= device.lastKnownIp || "unknown" %></span>
+              <span>
+                Last connected: <%= device.lastConnectedAt || "never" %><% if (device.hasSecret) { %> · Paired<% } %>
+              </span>
+              <% if (device.hasCandidateSecret) { %>
+                <span class="layout-edge-indicator">candidate secret</span>
+              <% } %>
+              <% if (device.hasSecret) { %>
+                <span>Paired</span>
+              <% } else { %>
+                <span>Not paired</span>
+              <% } %>
+            </div>
+          </div>
+
+          <div class="device-overview-actions">
+            <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
+              <button class="admin-action-button" type="submit">Approve</button>
+            </form>
+            <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
+              <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
+            </form>
+            <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
+              <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
+            </form>
+          </div>
+        </article>
+      <% }) %>
+    </section>
+  <% } %>
+</section>
+
+<%- include("../partials/footer") %>

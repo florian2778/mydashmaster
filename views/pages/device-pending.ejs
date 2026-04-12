@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/styles/main.css">
+  </head>
+  <body class="pending-page">
+    <main class="pending-wrap">
+      <p>Device</p>
+      <p><code><%= deviceCode %></code></p>
+      <p>Access pending</p>
+    </main>
+    <script>
+      (async () => {
+        const storageKey = "mydashmaster-device-secret";
+
+        function createDeviceSecret() {
+          const bytes = new Uint8Array(32);
+          window.crypto.getRandomValues(bytes);
+          return Array.from(bytes, (byte) =>
+            byte.toString(16).padStart(2, "0")
+          ).join("");
+        }
+
+        let deviceSecret = window.localStorage.getItem(storageKey);
+
+        if (!deviceSecret) {
+          deviceSecret = createDeviceSecret();
+          window.localStorage.setItem(storageKey, deviceSecret);
+        }
+
+        try {
+          const response = await window.fetch("/api/device/<%= deviceCode %>/auth", {
+            body: JSON.stringify({ deviceSecret }),
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            method: "POST"
+          });
+
+          const payload = await response.json();
+
+          if (payload.status === "approved") {
+            window.location.reload();
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      })();
+    </script>
+  </body>
+</html>

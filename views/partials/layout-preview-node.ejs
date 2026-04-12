@@ -1,0 +1,19 @@
+<% if (!node) { %>
+  <div class="layout-preview-empty">No preview</div>
+<% } else if (node.type === "row" || node.type === "column") { %>
+  <section
+    class="layout-preview-node layout-preview-node--<%= node.type %><%= node.isRoot ? ' layout-preview-node--root' : '' %>"
+    <% if (node.style) { %>style="<%= node.style %>"<% } %>
+  >
+    <% node.children.forEach((child) => { %>
+      <%- include("./layout-preview-node", { node: child }) %>
+    <% }) %>
+  </section>
+<% } else { %>
+  <article
+    class="layout-preview-node layout-preview-node--box<%= node.isInvalidBoxReference ? ' layout-preview-node--box-invalid' : '' %><%= node.isRoot ? ' layout-preview-node--root' : '' %>"
+    <% if (node.style) { %>style="<%= node.style %>"<% } %>
+  >
+    <span><%= node.box %></span>
+  </article>
+<% } %>

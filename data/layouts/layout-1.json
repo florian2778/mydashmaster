@@ -1,0 +1,36 @@
+{
+  "layoutId": "layout-1",
+  "options": {
+    "showHeader": false,
+    "showStatus": false,
+    "showLayoutTitle": false
+  },
+  "structure": {
+    "type": "column",
+    "gap": "12px",
+    "children": [
+      {
+        "type": "box",
+        "box": "box1",
+        "size": "160px"
+      },
+      {
+        "type": "box",
+        "box": "box2",
+        "size": "1fr"
+      }
+    ]
+  },
+  "boxes": [
+    {
+      "name": "box1",
+      "url": "https://example.com",
+      "zoom": 1
+    },
+    {
+      "name": "box2",
+      "url": "https://example.org",
+      "zoom": 0.8
+    }
+  ]
+}

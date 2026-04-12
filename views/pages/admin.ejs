@@ -1,0 +1,22 @@
+<%- include("../partials/header") %>
+
+<section class="panel">
+  <h1><%= heading %></h1>
+  <p>Admin overview for layout and device management.</p>
+
+  <section class="admin-overview-grid">
+    <article class="admin-overview-card">
+      <h2>Layouts</h2>
+      <p><strong><%= layoutCount %></strong> layout<%= layoutCount === 1 ? "" : "s" %> available.</p>
+      <p><a href="/admin/layouts">Open layout overview</a></p>
+    </article>
+
+    <article class="admin-overview-card">
+      <h2>Devices</h2>
+      <p><strong><%= deviceCount %></strong> device<%= deviceCount === 1 ? "" : "s" %> registered.</p>
+      <p><a href="/admin/devices">Open device overview</a></p>
+    </article>
+  </section>
+</section>
+
+<%- include("../partials/footer") %>

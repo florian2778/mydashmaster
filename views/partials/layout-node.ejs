@@ -1,0 +1,33 @@
+<% if (node.type === "row" || node.type === "column") { %>
+  <section
+    class="layout-node layout-node--<%= node.type %>"
+    <% if (node.style) { %>style="<%= node.style %>"<% } %>
+  >
+    <% node.children.forEach((child) => { %>
+      <%- include("./layout-node", { node: child }) %>
+    <% }) %>
+  </section>
+<% } else { %>
+  <article
+    class="layout-node layout-node--box"
+    <% if (node.style) { %>style="<%= node.style %>"<% } %>
+  >
+    <div class="layout-box-frame-wrap">
+      <div
+        class="layout-box-zoom-wrap"
+        style="
+          transform: scale(<%= node.zoom %>);
+          transform-origin: top left;
+          width: calc(100% / <%= node.zoom %>);
+          height: calc(100% / <%= node.zoom %>);
+        "
+      >
+        <iframe
+          class="layout-box-frame"
+          src="<%= node.url %>"
+          title="<%= node.name %>"
+        ></iframe>
+      </div>
+    </div>
+  </article>
+<% } %>

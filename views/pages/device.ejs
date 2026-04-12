@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" class="device-page">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/styles/main.css">
+  </head>
+  <body class="device-page">
+    <% if (options.showHeader) { %>
+      <header class="site-header">
+        <div class="container">
+          <a class="brand" href="/">MyDashmaster</a>
+        </div>
+      </header>
+    <% } %>
+
+    <main class="device-main<%= options.showHeader ? ' container' : '' %>">
+      <section class="<%= options.showHeader ? 'panel' : 'device-panel' %>">
+        <% if (options.showStatus) { %>
+          <h1>Device approved</h1>
+        <% } %>
+
+        <% if (!layoutId) { %>
+          <p>No layout assigned</p>
+        <% } else { %>
+          <% if (options.showLayoutTitle) { %>
+            <p>Layout: <%= layoutId %></p>
+          <% } %>
+
+          <% if (!hasBoxes) { %>
+            <p>No boxes configured</p>
+          <% } else { %>
+            <section class="layout-canvas">
+              <%- include("../partials/layout-node", { node: renderTree }) %>
+            </section>
+          <% } %>
+        <% } %>
+      </section>
+    </main>
+    <script>
+      (() => {
+        const currentState = {
+          authorized: true,
+          deviceCode: <%- JSON.stringify(deviceCode) %>,
+          layoutId: <%- JSON.stringify(layoutId || null) %>,
+          status: "approved"
+        };
+        const pollIntervalMs = 15000;
+
+        async function pollDeviceStatus() {
+          try {
+            const response = await window.fetch(
+              `/api/device/${encodeURIComponent(currentState.deviceCode)}/status`,
+              {
+                cache: "no-store",
+                credentials: "same-origin"
+              }
+            );
+            const payload = await response.json();
+
+            if (
+              !payload ||
+              payload.status !== currentState.status ||
+              payload.authorized !== currentState.authorized ||
+              payload.layoutId !== currentState.layoutId
+            ) {
+              window.location.reload();
+            }
+          } catch (error) {
+            console.error(error);
+          }
+        }
+
+        window.setInterval(pollDeviceStatus, pollIntervalMs);
+      })();
+    </script>
+  </body>
+</html>

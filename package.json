@@ -1,0 +1,16 @@
+{
+  "name": "mydashmaster",
+  "version": "1.0.0",
+  "description": "Lightweight dashboard system with Express and EJS.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test",
+    "validate:examples": "node scripts/validate-example-layouts.js"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.2"
+  }
+}

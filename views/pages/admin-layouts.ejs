@@ -1,0 +1,78 @@
+<%- include("../partials/header") %>
+
+<section class="panel">
+  <header class="admin-layouts-header">
+    <div>
+      <p class="admin-layouts-eyebrow">Admin</p>
+      <h1><%= heading %></h1>
+      <p class="admin-layouts-subtitle">
+        Existing layouts with validation state and structure preview.
+      </p>
+    </div>
+    <a class="admin-secondary-link" href="/admin">Back to admin</a>
+  </header>
+
+  <% if (layouts.length === 0) { %>
+    <p>No layout JSON files found in <code>data/layouts/</code>.</p>
+  <% } else { %>
+    <section class="layout-overview-list">
+      <% layouts.forEach((layout) => { %>
+        <article class="layout-overview-card">
+          <div class="layout-overview-meta">
+            <div class="layout-overview-topline">
+              <h2><%= layout.layoutId %></h2>
+              <span class="layout-status layout-status--<%= layout.status %>">
+                <%= layout.status %>
+              </span>
+            </div>
+
+            <div class="layout-overview-facts">
+              <span><%= layout.boxCount %> <%= layout.boxCount === 1 ? "box" : "boxes" %></span>
+              <% if (layout.warnings.length > 0) { %>
+                <span><%= layout.warnings.length %> warning<%= layout.warnings.length === 1 ? "" : "s" %></span>
+              <% } %>
+              <% if (layout.errors.length > 0) { %>
+                <span><%= layout.errors.length %> error<%= layout.errors.length === 1 ? "" : "s" %></span>
+              <% } %>
+              <% if (layout.previewSummary.hasOverflow) { %>
+                <span class="layout-edge-indicator">preview overflow</span>
+              <% } %>
+              <% if (layout.previewSummary.invalidBoxCount > 0) { %>
+                <span class="layout-edge-indicator layout-edge-indicator--error">
+                  <%= layout.previewSummary.invalidBoxCount %> invalid ref<%= layout.previewSummary.invalidBoxCount === 1 ? "" : "s" %>
+                </span>
+              <% } %>
+            </div>
+
+            <% if (layout.status === "warning") { %>
+              <p class="layout-overview-note">Validation warnings need review.</p>
+            <% } else if (layout.status === "error") { %>
+              <p class="layout-overview-note">Structure or data needs correction.</p>
+            <% } else if (layout.previewSummary.hasOverflow) { %>
+              <p class="layout-overview-note">Preview indicates overflow in the current size definition.</p>
+            <% } else if (layout.isNeutralPreview) { %>
+              <p class="layout-overview-note">Preview is shown in a neutral placeholder style.</p>
+            <% } else { %>
+              <p class="layout-overview-note">Preview reflects the current structure tree.</p>
+            <% } %>
+          </div>
+
+          <div class="layout-preview-shell<%= layout.isNeutralPreview ? ' layout-preview-shell--neutral' : '' %><%= layout.previewSummary.hasOverflow ? ' layout-preview-shell--overflow' : '' %>">
+            <% if (layout.previewSummary.hasOverflow) { %>
+              <span class="layout-preview-flag">Overflow</span>
+            <% } %>
+            <div class="layout-preview-frame">
+              <div class="layout-preview">
+            <%- include("../partials/layout-preview-node", {
+              node: layout.previewTree
+            }) %>
+              </div>
+            </div>
+          </div>
+        </article>
+      <% }) %>
+    </section>
+  <% } %>
+</section>
+
+<%- include("../partials/footer") %>

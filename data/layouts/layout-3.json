@@ -1,0 +1,53 @@
+{
+  "layoutId": "layout-3",
+  "options": {
+    "showHeader": false,
+    "showStatus": false,
+    "showLayoutTitle": false
+  },
+  "structure": {
+    "type": "row",
+    "gap": "0px",
+    "children": [
+      {
+	"type": "column",
+	"size": "50%",
+	"gap": "0px",
+	"children": [
+	  {
+            "type": "box",
+            "box": "box1",
+            "size": "50%"
+	  },
+	  {
+            "type": "box",
+	    "box": "box3",
+	    "size": "50%"
+	  }
+	]
+      },
+      {
+        "type": "box",
+        "box": "box2",
+        "size": "50%"
+      }
+    ]
+  },
+  "boxes": [
+    {
+      "name": "box1",
+      "url": "https://example.com",
+      "zoom": 1
+    },
+    {
+      "name": "box2",
+      "url": "https://example.org",
+      "zoom": 0.8
+    },
+    {
+      "name": "box3",
+      "url": "http://10.250.250.204:8088",
+      "zoom": 1.5
+    }
+  ]
+}
