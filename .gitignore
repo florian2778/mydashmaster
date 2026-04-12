@@ -1,0 +1,9 @@
+node_modules/
+
+data/device-auth/
+data/users/
+
+data/devices/*.json
+!data/devices/205s5kat.json
+!data/devices/demo-device.json
+!data/devices/demo-device-no2.json
