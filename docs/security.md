@@ -5,14 +5,14 @@
 Access requires:
 1. valid device code (routing only)
 2. approved device
-3. valid device secret (via cookie)
+3. valid device secret (validated via cookie or handshake)
 
 ---
 
 ## First Access
 
 - device is unknown or has no valid authentication
-- device is marked as pending
+- device is created or marked as pending
 - no layout is shown
 
 Display:
@@ -30,6 +30,18 @@ Access pending
 - never exposed in URL
 - sent to server for authentication
 
+Note:
+Using localStorage is an intentional MVP tradeoff. The secret is accessible via client-side JavaScript and therefore not as secure as hardware-bound storage, but acceptable for controlled device/kiosk environments.
+
+---
+
+## Pending State (Registration Phase)
+
+- client sends deviceSecret to server
+- server stores hash(deviceSecret) as candidateSecretHash
+- device remains in status: pending
+- no access is granted yet
+
 ---
 
 ## Approval
@@ -37,40 +49,65 @@ Access pending
 Admin must manually approve device.
 
 On approval:
-- device secret is registered
-- only the hash of the secret is stored on the server
-
----
-
-## Token / Cookie
-
-- server issues authentication cookie after successful validation
-- cookie represents validated device session
-- device secret is never stored in plain text on server
-- server stores only hash(deviceSecret)
+- candidateSecretHash becomes the active secret hash
+- device status changes to approved
+- only this registered secret is valid for future authentication
 
 ---
 
 ## Authentication Flow
 
 1. Device calls /d/{deviceCode}
-2. If no valid cookie:
-   - client sends deviceSecret
-3. Server:
-   - compares hash(deviceSecret)
-   - checks device status
-4. Access granted only if:
+2. Server checks:
+   - device exists
+   - device status
+3. If approved:
+   - validate cookie if present
+   - otherwise request deviceSecret from client
+4. Server compares:
+   - hash(deviceSecret) vs stored hash
+5. Access granted only if:
    - device is approved
    - secret matches
+
+If validation fails:
+- no layout is shown
+- fallback to pending / not authorized state
+
+---
+
+## Token / Cookie (Session Layer)
+
+- server issues authentication cookie after successful validation
+- cookie represents a temporary validated session
+- cookie does NOT replace deviceSecret authentication
+- cookie can be revalidated or reissued using deviceSecret
+
+Cookie expectations (MVP):
+- Secure (in HTTPS environments)
+- SameSite=Lax (or Strict if compatible)
+- HttpOnly where possible
 
 ---
 
 ## Revocation
 
-- device access can be revoked by admin
+- admin can revoke device access at any time
 - stored secret hash is removed or invalidated
-- device returns to pending state
-- re-approval required
+- device status changes to revoked or pending
+
+Effects:
+- device immediately loses access
+- existing cookies become invalid because validation fails
+- re-approval and re-pairing required
+
+---
+
+## Lost Device State
+
+If client loses local storage (e.g. browser reset):
+- device cannot authenticate anymore
+- must be re-approved and re-paired by admin
 
 ---
 
