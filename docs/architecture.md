@@ -52,11 +52,18 @@ users/
 ## Layout Model
 
 A layout consists of:
-- template_html
-- list of boxes
+- layoutId
+- options
+- structure
+- boxes
 
-Each box:
-- name (box1, box2, ...)
+The structure is a recursive tree of nodes:
+- row
+- column
+- box
+
+Boxes define iframe content:
+- name
 - url
 - zoom
 
