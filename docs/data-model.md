@@ -141,6 +141,49 @@ Defines spacing between children in row/column.
 
 ---
 
+## Layout Resolution Rules
+
+For every `row` or `column` container, sizing is resolved in this order:
+
+1. Determine the container inner size.
+2. Subtract the total gap space between all direct children.
+3. Apply fixed pixel sizes (`px`) first.
+4. Apply percentage sizes (`%`) relative to the remaining container inner size before `fr` distribution.
+5. Divide the remaining space across `fr` children proportionally.
+6. Continue recursively for child `row` and `column` nodes.
+
+Interpretation by container type:
+- In a `row`, sizes resolve horizontal space.
+- In a `column`, sizes resolve vertical space.
+
+Direct child rules:
+- `px` sizes are fixed.
+- `%` sizes are calculated from the container inner size.
+- `fr` sizes divide whatever space remains after gaps, `px`, and `%` have been applied.
+- If `size` is omitted, the renderer may treat the child as flexible remaining space.
+
+Example order:
+- Container size
+- minus gaps
+- minus fixed `px`
+- minus `%`
+- remaining space divided by `fr`
+
+### Overflow Behavior
+
+- The renderer does not auto-normalize sizes.
+- If sizes exceed the available space, the renderer keeps the defined values.
+- The validator is responsible for reporting warnings or errors for problematic size combinations.
+
+### Preview Rules
+
+- The admin preview uses the same sizing logic as the device renderer.
+- The preview scales the resolved layout into a fixed preview area.
+- The preview should remain visually representative of the real structure.
+- The preview does not need to be physically exact at pixel level.
+
+---
+
 ## Zoom Behavior
 
 - Zoom scales iframe content only
