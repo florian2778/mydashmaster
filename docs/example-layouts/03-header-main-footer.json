@@ -1,0 +1,40 @@
+{
+  "layoutId": "header-main-footer",
+  "structure": {
+	"type": "column",
+	"children": [
+	  {
+		"type": "box",
+		"box": "box1",
+		"size": "120px"
+	  },
+	  {
+		"type": "box",
+		"box": "box2",
+		"size": "1fr"
+	  },
+	  {
+		"type": "box",
+		"box": "box3",
+		"size": "80px"
+	  }
+	]
+  },
+  "boxes": [
+	{
+	  "name": "box1",
+	  "url": "https://example.com/header",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box2",
+	  "url": "https://example.com/main",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box3",
+	  "url": "https://example.com/footer",
+	  "zoom": 1.0
+	}
+  ]
+}

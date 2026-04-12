@@ -1,0 +1,72 @@
+{
+  "layoutId": "nested-dashboard",
+  "structure": {
+	"type": "row",
+	"children": [
+	  {
+		"type": "column",
+		"size": "65%",
+		"children": [
+		  {
+			"type": "box",
+			"box": "box1",
+			"size": "110px"
+		  },
+		  {
+			"type": "box",
+			"box": "box2",
+			"size": "1fr"
+		  }
+		]
+	  },
+	  {
+		"type": "column",
+		"size": "35%",
+		"children": [
+		  {
+			"type": "box",
+			"box": "box3",
+			"size": "33%"
+		  },
+		  {
+			"type": "box",
+			"box": "box4",
+			"size": "33%"
+		  },
+		  {
+			"type": "box",
+			"box": "box5",
+			"size": "34%"
+		  }
+		]
+	  }
+	]
+  },
+  "boxes": [
+	{
+	  "name": "box1",
+	  "url": "https://example.com/status",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box2",
+	  "url": "https://example.com/main",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box3",
+	  "url": "https://example.com/right-1",
+	  "zoom": 0.9
+	},
+	{
+	  "name": "box4",
+	  "url": "https://example.com/right-2",
+	  "zoom": 0.9
+	},
+	{
+	  "name": "box5",
+	  "url": "https://example.com/right-3",
+	  "zoom": 0.9
+	}
+  ]
+}

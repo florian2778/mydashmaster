@@ -1,0 +1,46 @@
+{
+  "layoutId": "top-bottom-with-sidebar",
+  "structure": {
+	"type": "column",
+	"children": [
+	  {
+		"type": "box",
+		"box": "box1",
+		"size": "45%"
+	  },
+	  {
+		"type": "row",
+		"size": "55%",
+		"children": [
+		  {
+			"type": "box",
+			"box": "box2",
+			"size": "70%"
+		  },
+		  {
+			"type": "box",
+			"box": "box3",
+			"size": "30%"
+		  }
+		]
+	  }
+	]
+  },
+  "boxes": [
+	{
+	  "name": "box1",
+	  "url": "https://example.com/top",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box2",
+	  "url": "https://example.com/bottom-main",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box3",
+	  "url": "https://example.com/bottom-side",
+	  "zoom": 0.85
+	}
+  ]
+}

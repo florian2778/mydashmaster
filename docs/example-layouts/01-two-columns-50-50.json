@@ -1,0 +1,30 @@
+{
+  "layoutId": "two-columns-50-50",
+  "structure": {
+	"type": "row",
+	"children": [
+	  {
+		"type": "box",
+		"box": "box1",
+		"size": "50%"
+	  },
+	  {
+		"type": "box",
+		"box": "box2",
+		"size": "50%"
+	  }
+	]
+  },
+  "boxes": [
+	{
+	  "name": "box1",
+	  "url": "https://example.com/left",
+	  "zoom": 1.0
+	},
+	{
+	  "name": "box2",
+	  "url": "https://example.com/right",
+	  "zoom": 1.0
+	}
+  ]
+}
