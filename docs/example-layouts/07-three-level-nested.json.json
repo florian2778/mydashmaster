@@ -1,15 +1,23 @@
 {
   "layoutId": "three-level-nested",
+  "options": {
+    "showHeader": true,
+    "showStatus": true,
+    "showLayoutTitle": true
+  },
   "structure": {
 	"type": "row",
+	"gap": "10px",
 	"children": [
 	  {
 		"type": "column",
 		"size": "70%",
+		"gap": "10px",
 		"children": [
 		  {
 			"type": "row",
 			"size": "160px",
+			"gap": "8px",
 			"children": [
 			  {
 				"type": "box",
@@ -33,6 +41,7 @@
 	  {
 		"type": "column",
 		"size": "30%",
+		"gap": "8px",
 		"children": [
 		  {
 			"type": "box",
@@ -42,6 +51,7 @@
 		  {
 			"type": "row",
 			"size": "50%",
+			"gap": "8px",
 			"children": [
 			  {
 				"type": "box",

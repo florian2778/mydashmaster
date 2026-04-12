@@ -1,11 +1,18 @@
 {
   "layoutId": "nested-dashboard",
+  "options": {
+    "showHeader": false,
+    "showStatus": false,
+    "showLayoutTitle": true
+  },
   "structure": {
 	"type": "row",
+	"gap": "12px",
 	"children": [
 	  {
 		"type": "column",
 		"size": "65%",
+		"gap": "8px",
 		"children": [
 		  {
 			"type": "box",
@@ -22,6 +29,7 @@
 	  {
 		"type": "column",
 		"size": "35%",
+		"gap": "6px",
 		"children": [
 		  {
 			"type": "box",

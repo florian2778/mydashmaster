@@ -1,7 +1,13 @@
 {
   "layoutId": "two-columns-60-40",
+  "options": {
+    "showHeader": false,
+    "showStatus": true,
+    "showLayoutTitle": true
+  },
   "structure": {
 	"type": "row",
+	"gap": "12px",
 	"children": [
 	  {
 		"type": "box",

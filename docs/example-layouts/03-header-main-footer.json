@@ -1,7 +1,13 @@
 {
   "layoutId": "header-main-footer",
+  "options": {
+    "showHeader": true,
+    "showStatus": false,
+    "showLayoutTitle": true
+  },
   "structure": {
 	"type": "column",
+	"gap": "10px",
 	"children": [
 	  {
 		"type": "box",

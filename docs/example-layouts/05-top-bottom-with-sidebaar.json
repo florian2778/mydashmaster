@@ -1,7 +1,13 @@
 {
   "layoutId": "top-bottom-with-sidebar",
+  "options": {
+    "showHeader": false,
+    "showStatus": true,
+    "showLayoutTitle": true
+  },
   "structure": {
 	"type": "column",
+	"gap": "8px",
 	"children": [
 	  {
 		"type": "box",
@@ -11,6 +17,7 @@
 	  {
 		"type": "row",
 		"size": "55%",
+		"gap": "8px",
 		"children": [
 		  {
 			"type": "box",
