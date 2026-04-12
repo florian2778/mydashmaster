@@ -1,4 +1,3 @@
-
 # Data Model
 
 This document defines the JSON structure used by MyDashmaster.
@@ -16,6 +15,12 @@ A device consists of:
 - status
 - layoutId
 
+A device auth record consists of:
+- deviceCode
+- candidateSecretHash (optional)
+- secretHash (optional)
+- updatedAt (optional)
+
 The layout structure is a recursive tree of nodes:
 - row
 - column
@@ -27,15 +32,6 @@ The layout structure is a recursive tree of nodes:
 
 Path: data/devices/{deviceCode}.json
 
-status can be:
-- pending
-- approved
-- revoked
-
-- pending: device is registered but not yet approved
-- approved: device is allowed to access layout with valid authentication
-- revoked: device access is explicitly disabled
-
 Example:
 
 {
@@ -43,6 +39,71 @@ Example:
   "status": "approved",
   "layoutId": "layout-1"
 }
+
+Fields:
+- deviceCode (string)
+- status (string)
+- layoutId (string)
+
+status can be:
+- pending
+- approved
+- revoked
+
+Status meaning:
+- pending: device is registered but not yet approved
+- approved: device is allowed to access layout with valid authentication
+- revoked: device access is explicitly disabled
+
+---
+
+## Device Authentication
+
+Path: data/device-auth/{deviceCode}.json
+
+This file stores authentication-related data for a device.
+
+Example:
+
+{
+  "deviceCode": "demo-device",
+  "candidateSecretHash": "hashed-value",
+  "secretHash": "hashed-value",
+  "updatedAt": "2026-04-12T12:00:00Z"
+}
+
+Fields:
+- deviceCode (string)
+- candidateSecretHash (string, optional)
+  - used while device is in pending state
+- secretHash (string, optional)
+  - active authentication hash for approved devices
+- updatedAt (string, optional)
+
+Rules:
+- The plain deviceSecret is never stored on the server.
+- Only a one-way hash is persisted.
+- `candidateSecretHash` is used before approval.
+- `secretHash` is the active authentication hash after approval.
+
+---
+
+## Device Authentication Lifecycle
+
+- On first contact:
+  - client sends deviceSecret
+  - server stores candidateSecretHash
+
+- On approval:
+  - candidateSecretHash becomes secretHash
+  - candidateSecretHash may be removed
+
+- On authentication:
+  - hash(deviceSecret) must match secretHash
+
+- On revocation:
+  - secretHash is removed or invalidated
+  - device loses access immediately
 
 ---
 
@@ -157,7 +218,7 @@ For every `row` or `column` container, sizing is resolved in this order:
 1. Determine the container inner size.
 2. Subtract the total gap space between all direct children.
 3. Apply fixed pixel sizes (`px`) first.
-4. Apply percentage sizes (`%`) relative to the remaining container inner size before `fr` distribution.
+4. Apply percentage sizes (`%`) relative to the container inner size.
 5. Divide the remaining space across `fr` children proportionally.
 6. Continue recursively for child `row` and `column` nodes.
 
@@ -220,43 +281,3 @@ Each layout should have:
 - preview graphic (approx. 240x135 px)
 - layoutId display
 - validation status (valid / warning / error)
-
-## Device Authentication Lifecycle
-
-- On first contact:
-  - client sends deviceSecret
-  - server stores candidateSecretHash
-
-- On approval:
-  - candidateSecretHash becomes secretHash
-  - candidateSecretHash may be removed
-
-- On authentication:
-  - hash(deviceSecret) must match secretHash
-
-- On revocation:
-  - secretHash is removed or invalidated
-  - device loses access immediately
-  
-  ---
-  
-  ## Device Authentication Lifecycle
-  
-  - On first contact:
-    - client sends deviceSecret
-    - server stores candidateSecretHash
-  
-  - On approval:
-    - candidateSecretHash becomes secretHash
-    - candidateSecretHash may be removed
-  
-  - On authentication:
-    - hash(deviceSecret) must match secretHash
-  
-  - On revocation:
-    - secretHash is removed or invalidated
-    - device loses access immediately
-    
-    
-  The plain deviceSecret is never stored on the server.
-  Only a one-way hash is persisted.
