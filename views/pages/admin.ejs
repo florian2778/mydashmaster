@@ -3,6 +3,9 @@
 <section class="panel">
   <h1><%= heading %></h1>
   <p>Admin overview for layout and device management.</p>
+  <% if (appRevision) { %>
+    <p><strong>Revision:</strong> <code><%= appRevision %></code></p>
+  <% } %>
 
   <section class="admin-overview-grid">
     <article class="admin-overview-card">

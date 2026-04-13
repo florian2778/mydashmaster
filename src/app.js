@@ -34,6 +34,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use((req, res, next) => {
   Object.assign(res.locals, adminAuthViewModel(req));
+  res.locals.appRevision = process.env.APP_REVISION || null;
   next();
 });
 
