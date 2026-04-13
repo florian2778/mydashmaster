@@ -15,16 +15,18 @@ services:
     volumes:
       - ./data:/app/data
     networks:
-      - traefik
+      # Join the same external Docker network as the Traefik instance.
+      - proxy
     labels:
       - traefik.enable=true
-      - traefik.docker.network=${TRAEFIK_NETWORK:-traefik}
+      - traefik.docker.network=${TRAEFIK_NETWORK:-proxy}
       - traefik.http.routers.mydashmaster.rule=Host(`${MYDASHMASTER_HOST}`)
       - traefik.http.routers.mydashmaster.entrypoints=websecure
       - traefik.http.routers.mydashmaster.tls=true
+      - traefik.http.routers.mydashmaster.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
       - traefik.http.services.mydashmaster.loadbalancer.server.port=3000
 
 networks:
-  traefik:
+  proxy:
     external: true
-    name: ${TRAEFIK_NETWORK:-traefik}
+    name: ${TRAEFIK_NETWORK:-proxy}

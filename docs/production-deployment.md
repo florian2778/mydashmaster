@@ -195,3 +195,34 @@ The compose setup assumes:
 - Traefik already exists
 - the external Docker network already exists
 - hostname and Traefik network are provided through environment variables
+
+---
+
+## Traefik Deployment Checklist
+
+Expected shared external Docker network:
+
+- `proxy`
+
+MyDashmaster must join that same external Docker network as Traefik or Traefik will not be able to reach the container.
+
+Required env values before first start:
+
+- `MYDASHMASTER_HOST`
+- `TRAEFIK_NETWORK`
+- `TRAEFIK_CERTRESOLVER`
+- `MYDASHMASTER_SESSION_SECRET`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD_HASH`
+- `ADMIN_SESSION_SECRET`
+
+Recommended validation before `docker compose up -d --build`:
+
+- run `docker compose config`
+- confirm the shared network exists: `docker network inspect proxy`
+- confirm the rendered Traefik labels use the expected host, network, and certresolver
+
+ACME / TLS expectations:
+
+- the router should use `Host(${MYDASHMASTER_HOST})`, entrypoint `websecure`, TLS enabled, a configured certresolver, and service port `3000`
+- after correcting a bad host, network, or certresolver setting, a container and/or router restart may be needed before a fresh ACME attempt succeeds
