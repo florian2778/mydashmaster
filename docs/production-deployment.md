@@ -163,3 +163,35 @@ Use:
 - explicit production secrets via environment variables
 
 This keeps the architecture simple while remaining suitable for productive internet deployment.
+
+---
+
+## Docker Compose Deployment
+
+The repository now includes:
+
+- `Dockerfile`
+- `compose.yaml`
+- `.dockerignore`
+
+Intended usage:
+
+- build directly on the target host
+- run one container instance only
+- keep `./data` mounted into the container as persistent application state
+
+Compose mount:
+
+- `./data:/app/data`
+
+This preserves:
+
+- layouts
+- devices
+- device-auth state
+
+The compose setup assumes:
+
+- Traefik already exists
+- the external Docker network already exists
+- hostname and Traefik network are provided through environment variables
