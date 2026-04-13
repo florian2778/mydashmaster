@@ -46,39 +46,71 @@
               <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
                 <%= device.status %>
               </span>
+              <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
             </div>
 
-            <div class="device-overview-facts">
+            <div class="device-overview-facts device-overview-facts--primary">
               <span>Layout: <%= device.layoutId || "none" %></span>
               <span>
                 Link:
                 <a href="/d/<%= device.deviceCode %>"><code>/d/<%= device.deviceCode %></code></a>
               </span>
-              <span>Last IP: <%= device.lastKnownIp || "unknown" %></span>
               <span>
-                Last connected: <%= device.lastConnectedAt || "never" %><% if (device.hasSecret) { %> · Paired<% } %>
+                <a class="admin-inline-link" href="/admin/devices/<%= device.deviceCode %>/layout">Change layout</a>
               </span>
+            </div>
+
+            <div class="device-overview-facts device-overview-facts--secondary">
+              <span>Last access: <%= device.displayLastAccessDate %></span>
+              <span>IP: <%= device.displayLastIp %></span>
+              <span>Seen: <%= device.displayLastSeen %></span>
               <% if (device.hasCandidateSecret) { %>
                 <span class="layout-edge-indicator">candidate secret</span>
               <% } %>
-              <% if (device.hasSecret) { %>
-                <span>Paired</span>
-              <% } else { %>
-                <span>Not paired</span>
-              <% } %>
             </div>
+
+            <% if (device.lastRejectedAt || device.lastRejectedIp || device.lastRejectedReason) { %>
+              <p class="device-diagnostic-note">
+                Last rejected:
+                <%= device.displayLastRejectedDate %>
+                <% if (device.lastRejectedIp || device.displayRejectedIp !== "-") { %>
+                  · IP <%= device.displayRejectedIp %>
+                <% } %>
+                <% if (device.lastRejectedReason) { %>
+                  · <%= device.lastRejectedReason %>
+                <% } %>
+              </p>
+            <% } %>
           </div>
 
           <div class="device-overview-actions">
-            <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
-              <button class="admin-action-button" type="submit">Approve</button>
-            </form>
-            <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
-              <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
-            </form>
-            <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
-              <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
-            </form>
+            <div class="device-overview-actions-main">
+              <% if (device.canApprove) { %>
+                <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
+                  <button class="admin-action-button" type="submit">Approve</button>
+                </form>
+              <% } %>
+              <% if (device.canResetPairing) { %>
+                <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
+                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reset pairing</button>
+                </form>
+              <% } %>
+              <% if (device.canReload) { %>
+                <form action="/admin/devices/<%= device.deviceCode %>/reload" method="post">
+                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reload</button>
+                </form>
+              <% } %>
+              <% if (device.canRevoke) { %>
+                <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
+                  <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
+                </form>
+              <% } %>
+            </div>
+            <div class="device-overview-actions-destructive">
+              <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
+                <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
+              </form>
+            </div>
           </div>
         </article>
       <% }) %>

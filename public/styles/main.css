@@ -44,10 +44,27 @@ pre {
   gap: 1rem;
 }
 
+.site-header-actions {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+}
+
 .brand,
 .nav a {
   color: inherit;
   text-decoration: none;
+}
+
+.header-logout-button {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 999px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.45rem 0.8rem;
 }
 
 main.container {
@@ -78,6 +95,11 @@ main.container {
   overflow: hidden;
   padding: 0;
   width: 100%;
+}
+
+.device-layout-root--updating {
+  opacity: 0.72;
+  transition: opacity 0.2s ease;
 }
 
 .layout-node {
@@ -400,8 +422,18 @@ body.device-page .layout-canvas {
   padding: 0.55rem 0.75rem;
 }
 
+.admin-device-layout-panel {
+  grid-template-columns: 1fr;
+}
+
+.admin-form-error {
+  color: #b42318;
+  font-size: 0.92rem;
+  margin: 0;
+}
+
 .device-overview-card {
-  align-items: center;
+  align-items: start;
   border: 1px solid #d8e1ea;
   border-radius: 12px;
   display: grid;
@@ -412,7 +444,14 @@ body.device-page .layout-canvas {
 
 .device-overview-meta {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.65rem;
+}
+
+.device-diagnostic-note {
+  color: #52606d;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  margin: 0;
 }
 
 .device-overview-facts {
@@ -422,9 +461,40 @@ body.device-page .layout-canvas {
   gap: 0.75rem;
 }
 
+.device-overview-facts--primary {
+  font-weight: 500;
+}
+
+.admin-inline-link {
+  color: #136c3d;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.admin-inline-link:hover {
+  text-decoration: underline;
+}
+
+.device-overview-facts--secondary {
+  font-size: 0.92rem;
+}
+
 .device-overview-actions {
+  display: grid;
+  gap: 0.65rem;
+  justify-items: end;
+}
+
+.device-overview-actions-main {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.device-overview-actions-destructive {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .admin-action-button {
@@ -436,6 +506,12 @@ body.device-page .layout-canvas {
   font: inherit;
   font-weight: 600;
   padding: 0.55rem 0.85rem;
+}
+
+.admin-action-button--secondary {
+  background: #f4f7fb;
+  border-color: #c9d3dd;
+  color: #334155;
 }
 
 .admin-action-button--danger {
@@ -498,6 +574,50 @@ body.device-page .layout-canvas {
   background: #edf2f7;
 }
 
+.auth-panel {
+  margin: 3rem auto;
+  max-width: 28rem;
+}
+
+.auth-panel h1 {
+  margin-bottom: 0.4rem;
+  margin-top: 0;
+}
+
+.auth-subtitle {
+  color: #52606d;
+  margin-bottom: 1.25rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-form label {
+  color: #52606d;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.auth-form input {
+  background: #fff;
+  border: 1px solid #c9d3dd;
+  border-radius: 10px;
+  color: #1f2933;
+  font: inherit;
+  padding: 0.7rem 0.8rem;
+}
+
+.auth-error {
+  background: #fde7e7;
+  border: 1px solid #e8a5a5;
+  border-radius: 10px;
+  color: #b42318;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.85rem;
+}
+
 @media (max-width: 900px) {
   .layout-overview-card {
     grid-template-columns: 1fr;
@@ -508,9 +628,22 @@ body.device-page .layout-canvas {
     grid-template-columns: 1fr;
   }
 
+  .device-overview-actions,
+  .device-overview-actions-destructive,
+  .device-overview-actions-main {
+    justify-content: flex-start;
+    justify-items: start;
+  }
+
   .layout-preview {
     max-width: 100%;
     width: 100%;
+  }
+
+  .site-header .container,
+  .site-header-actions {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
@@ -533,5 +666,12 @@ pre {
 }
 
 .pending-wrap {
+  max-width: 32rem;
   text-align: center;
+}
+
+.pending-note {
+  color: #52606d;
+  line-height: 1.5;
+  margin: 0.75rem 0 0;
 }

@@ -1,0 +1,21 @@
+<section
+  id="device-layout-root"
+  class="device-layout-root"
+  data-layout-id="<%= layoutId || "" %>"
+>
+  <% if (!layoutId || !layoutExists) { %>
+    <p>No layout assigned</p>
+  <% } else { %>
+    <% if (options.showLayoutTitle) { %>
+      <p>Layout: <%= layoutId %></p>
+    <% } %>
+
+    <% if (!hasBoxes) { %>
+      <p>No boxes configured</p>
+    <% } else { %>
+      <section class="layout-canvas">
+        <%- include("./layout-node", { node: renderTree }) %>
+      </section>
+    <% } %>
+  <% } %>
+</section>

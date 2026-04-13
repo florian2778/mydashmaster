@@ -1,4 +1,8 @@
 const crypto = require("crypto");
+const {
+  getRequestIp,
+  shouldUseSecureCookies
+} = require("../http/request-context");
 
 const DEVICE_SESSION_COOKIE = "mydashmaster_device";
 
@@ -34,18 +38,6 @@ function parseCookies(headerValue) {
   }, {});
 }
 
-function getRequestIp(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-  const forwardedIp = Array.isArray(forwarded)
-    ? forwarded[0]
-    : typeof forwarded === "string"
-      ? forwarded.split(",")[0]
-      : null;
-  const rawIp = forwardedIp || req.ip || req.socket?.remoteAddress || "";
-
-  return rawIp.replace(/^::ffff:/, "");
-}
-
 function hasValidDeviceSession(req, deviceCode, secretHash) {
   if (!secretHash) {
     return false;
@@ -75,15 +67,16 @@ function setDeviceSessionCookie(req, res, deviceCode, secretHash) {
     maxAge: 1000 * 60 * 60 * 24 * 7,
     path: "/",
     sameSite: "lax",
-    secure: req.secure
+    secure: shouldUseSecureCookies(req)
   });
 }
 
-function clearDeviceSessionCookie(res, deviceCode) {
+function clearDeviceSessionCookie(req, res, deviceCode) {
   res.clearCookie(DEVICE_SESSION_COOKIE, {
     httpOnly: true,
     path: "/",
-    sameSite: "lax"
+    sameSite: "lax",
+    secure: shouldUseSecureCookies(req)
   });
 }
 

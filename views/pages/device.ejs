@@ -21,21 +21,13 @@
           <h1>Device approved</h1>
         <% } %>
 
-        <% if (!layoutId) { %>
-          <p>No layout assigned</p>
-        <% } else { %>
-          <% if (options.showLayoutTitle) { %>
-            <p>Layout: <%= layoutId %></p>
-          <% } %>
-
-          <% if (!hasBoxes) { %>
-            <p>No boxes configured</p>
-          <% } else { %>
-            <section class="layout-canvas">
-              <%- include("../partials/layout-node", { node: renderTree }) %>
-            </section>
-          <% } %>
-        <% } %>
+        <%- include("../partials/device-layout-root", {
+          hasBoxes,
+          layoutExists,
+          layoutId,
+          options,
+          renderTree
+        }) %>
       </section>
     </main>
     <script>
@@ -44,9 +36,141 @@
           authorized: true,
           deviceCode: <%- JSON.stringify(deviceCode) %>,
           layoutId: <%- JSON.stringify(layoutId || null) %>,
+          reloadVersion: <%- JSON.stringify(reloadVersion || 0) %>,
           status: "approved"
         };
-        const pollIntervalMs = 15000;
+        const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
+        let fragmentFailureCount = 0;
+        let isUpdatingLayout = false;
+        let latestExpectedLayoutId = currentState.layoutId;
+
+        function normalizeLayoutId(value) {
+          return typeof value === "string" && value !== "" ? value : null;
+        }
+
+        function initializeLayoutRoot(layoutRoot) {
+          return layoutRoot;
+        }
+
+        function getLayoutRoot() {
+          return document.getElementById("device-layout-root");
+        }
+
+        async function fetchLayoutFragment() {
+          const response = await window.fetch(
+            `/api/device/${encodeURIComponent(currentState.deviceCode)}/layout-fragment`,
+            {
+              cache: "no-store",
+              credentials: "same-origin"
+            }
+          );
+
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            const error = new Error("Layout fragment request is no longer authorized");
+            error.code = "LAYOUT_UNAUTHORIZED";
+            throw error;
+          }
+
+          if (!response.ok) {
+            throw new Error(`Layout fragment request failed with ${response.status}`);
+          }
+
+          const fragmentHtml = await response.text();
+          const parser = new window.DOMParser();
+          const fragmentDocument = parser.parseFromString(fragmentHtml, "text/html");
+          const nextLayoutRoot = fragmentDocument.getElementById("device-layout-root");
+          const headerLayoutId = normalizeLayoutId(response.headers.get("x-layout-id"));
+          const fragmentLayoutId = nextLayoutRoot
+            ? normalizeLayoutId(nextLayoutRoot.getAttribute("data-layout-id"))
+            : null;
+
+          if (!nextLayoutRoot) {
+            throw new Error("Layout fragment root is missing");
+          }
+
+          if (headerLayoutId !== fragmentLayoutId) {
+            throw new Error("Layout fragment metadata does not match");
+          }
+
+          return {
+            layoutId: fragmentLayoutId,
+            layoutRoot: nextLayoutRoot
+          };
+        }
+
+        async function updateLayoutFragment(nextLayoutId) {
+          if (isUpdatingLayout) {
+            latestExpectedLayoutId = nextLayoutId;
+            return;
+          }
+
+          isUpdatingLayout = true;
+          latestExpectedLayoutId = nextLayoutId;
+
+          const currentLayoutRoot = getLayoutRoot();
+
+          if (currentLayoutRoot) {
+            currentLayoutRoot.classList.add("device-layout-root--updating");
+          }
+
+          let shouldContinueUpdate = false;
+
+          try {
+            const requestedLayoutId = latestExpectedLayoutId;
+            const { layoutId: fragmentLayoutId, layoutRoot } =
+              await fetchLayoutFragment();
+
+            if (
+              requestedLayoutId !== latestExpectedLayoutId ||
+              fragmentLayoutId !== latestExpectedLayoutId
+            ) {
+              shouldContinueUpdate = currentState.layoutId !== latestExpectedLayoutId;
+              return;
+            }
+
+            const activeLayoutRoot = getLayoutRoot();
+
+            if (!activeLayoutRoot) {
+              throw new Error("Current layout root is missing");
+            }
+
+            initializeLayoutRoot(layoutRoot);
+            activeLayoutRoot.replaceWith(layoutRoot);
+
+            currentState.layoutId = fragmentLayoutId;
+            fragmentFailureCount = 0;
+          } catch (error) {
+            if (error.code === "LAYOUT_UNAUTHORIZED") {
+              window.location.reload();
+              return;
+            }
+
+            fragmentFailureCount += 1;
+
+            if (fragmentFailureCount >= 3) {
+              window.location.reload();
+              return;
+            }
+
+            console.error(error);
+          } finally {
+            const activeLayoutRoot = getLayoutRoot();
+
+            if (activeLayoutRoot) {
+              activeLayoutRoot.classList.remove("device-layout-root--updating");
+            }
+
+            isUpdatingLayout = false;
+
+            if (shouldContinueUpdate) {
+              window.queueMicrotask(() => {
+                updateLayoutFragment(latestExpectedLayoutId).catch((error) => {
+                  console.error(error);
+                });
+              });
+            }
+          }
+        }
 
         async function pollDeviceStatus() {
           try {
@@ -62,10 +186,20 @@
             if (
               !payload ||
               payload.status !== currentState.status ||
-              payload.authorized !== currentState.authorized ||
-              payload.layoutId !== currentState.layoutId
+              payload.accessState !== "authorized" ||
+              payload.authorized !== true
             ) {
               window.location.reload();
+              return;
+            }
+
+            if (payload.reloadVersion !== currentState.reloadVersion) {
+              window.location.reload();
+              return;
+            }
+
+            if (payload.layoutId !== currentState.layoutId) {
+              await updateLayoutFragment(payload.layoutId);
             }
           } catch (error) {
             console.error(error);

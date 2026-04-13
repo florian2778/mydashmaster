@@ -5,61 +5,60 @@ const {
   getRequestIp,
   hasValidDeviceSession
 } = require("../auth/device-auth");
+const { buildDeviceLayoutViewModel } = require("../device/layout-render");
 const {
   recordDeviceActivity,
+  recordDeviceRejection,
   readDevice,
-  readDeviceAuth,
-  readLayout
+  readDeviceAuth
 } = require("../storage/json-store");
 
 const router = express.Router();
 
-function getNodeStyle(size, parentType) {
-  if (!parentType) {
-    return [];
-  }
-
-  if (!size) {
-    return ["flex: 1 1 0;"];
-  }
-
-  if (size.endsWith("fr")) {
-    const value = Number.parseFloat(size);
-    return [`flex: ${value} ${value} 0;`];
-  }
-
-  return [`flex: 0 0 ${size};`];
-}
-
-function buildRenderNode(node, boxMap, parentType = null) {
-  const styleParts = getNodeStyle(node.size, parentType);
-
-  if ((node.type === "row" || node.type === "column") && node.gap) {
-    styleParts.push(`gap: ${node.gap};`);
-  }
-
-  const renderNode = {
-    type: node.type,
-    style: styleParts.join(" ")
+function renderAccessState(res, deviceCode, accessState) {
+  const states = {
+    auth_mismatch: {
+      message: "Access not available in this browser",
+      note:
+        "This device is already linked to another browser session. Re-linking requires an admin action.",
+      pageTitle: "Access not available",
+      shouldBootstrap: false,
+      shouldPoll: true
+    },
+    not_paired: {
+      message: "Device not paired",
+      note: null,
+      pageTitle: "Device not paired",
+      shouldBootstrap: true,
+      shouldPoll: true
+    },
+    pending: {
+      message: "Access pending",
+      note: null,
+      pageTitle: "Access pending",
+      shouldBootstrap: true,
+      shouldPoll: true
+    },
+    revoked: {
+      message: "Access revoked",
+      note:
+        "This device no longer has access. Please contact an administrator.",
+      pageTitle: "Access revoked",
+      shouldBootstrap: false,
+      shouldPoll: true
+    }
   };
+  const state = states[accessState];
 
-  if (node.type === "box") {
-    const box = boxMap.get(node.box);
-
-    return {
-      ...renderNode,
-      name: box.name,
-      url: box.url,
-      zoom: box.zoom
-    };
-  }
-
-  return {
-    ...renderNode,
-    children: node.children.map((child) =>
-      buildRenderNode(child, boxMap, node.type)
-    )
-  };
+  return res.render("pages/device-pending", {
+    accessState,
+    deviceCode,
+    message: state.message,
+    note: state.note,
+    pageTitle: state.pageTitle,
+    shouldBootstrap: state.shouldBootstrap,
+    shouldPoll: state.shouldPoll
+  });
 }
 
 router.get("/:deviceCode", async (req, res, next) => {
@@ -68,78 +67,48 @@ router.get("/:deviceCode", async (req, res, next) => {
     const device = await readDevice(deviceCode);
 
     if (!device) {
-      clearDeviceSessionCookie(res, deviceCode);
+      clearDeviceSessionCookie(req, res, deviceCode);
       return res.status(404).render("pages/device-unknown", {
         pageTitle: "Unknown device",
         deviceCode
       });
     }
 
-    if (device.status === "pending" || device.status === "revoked") {
-      clearDeviceSessionCookie(res, deviceCode);
-      return res.render("pages/device-pending", {
-        pageTitle: "Access pending",
-        deviceCode
-      });
+    if (device.status === "revoked") {
+      clearDeviceSessionCookie(req, res, deviceCode);
+      return renderAccessState(res, deviceCode, "revoked");
+    }
+
+    if (device.status === "pending") {
+      clearDeviceSessionCookie(req, res, deviceCode);
+      return renderAccessState(res, deviceCode, "pending");
     }
 
     const deviceAuth = await readDeviceAuth(deviceCode);
 
     if (!deviceAuth?.secretHash) {
-      clearDeviceSessionCookie(res, deviceCode);
-      return res.render("pages/device-pending", {
-        pageTitle: "Access pending",
-        deviceCode
-      });
+      clearDeviceSessionCookie(req, res, deviceCode);
+      return renderAccessState(res, deviceCode, "not_paired");
     }
 
     if (!hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)) {
-      clearDeviceSessionCookie(res, deviceCode);
-      return res.render("pages/device-pending", {
-        pageTitle: "Access pending",
-        deviceCode
-      });
+      await recordDeviceRejection(
+        deviceCode,
+        getRequestIp(req),
+        "auth_mismatch"
+      );
+      clearDeviceSessionCookie(req, res, deviceCode);
+      return renderAccessState(res, deviceCode, "auth_mismatch");
     }
 
     await recordDeviceActivity(deviceCode, getRequestIp(req));
-
-    if (!device.layoutId) {
-      return res.render("pages/device", {
-        deviceCode,
-        pageTitle: `Device ${deviceCode}`,
-        hasBoxes: false,
-        layoutId: null,
-        options: {
-          showHeader: false,
-          showStatus: false,
-          showLayoutTitle: false
-        },
-        renderTree: null
-      });
-    }
-
-    const layout = await readLayout(device.layoutId);
-    const hasBoxes = layout && layout.boxes.length > 0;
-    const renderTree = layout
-      ? buildRenderNode(
-          layout.structure,
-          new Map(layout.boxes.map((box) => [box.name, box]))
-        )
-      : null;
-    const options = {
-      showHeader: false,
-      showStatus: false,
-      showLayoutTitle: false,
-      ...(layout?.options || {})
-    };
+    const layoutViewModel = await buildDeviceLayoutViewModel(device);
 
     res.render("pages/device", {
       deviceCode,
       pageTitle: `Device ${deviceCode}`,
-      layoutId: layout ? device.layoutId : null,
-      hasBoxes,
-      options,
-      renderTree
+      reloadVersion: deviceAuth.reloadVersion || 0,
+      ...layoutViewModel
     });
   } catch (error) {
     next(error);

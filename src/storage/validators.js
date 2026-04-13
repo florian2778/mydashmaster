@@ -110,6 +110,36 @@ function validateDeviceAuth(deviceAuth) {
     result.errors.push("Invalid device auth: lastConnectedAt must be a string");
   }
 
+  if (
+    deviceAuth.lastRejectedAt !== undefined &&
+    typeof deviceAuth.lastRejectedAt !== "string"
+  ) {
+    result.errors.push("Invalid device auth: lastRejectedAt must be a string");
+  }
+
+  if (
+    deviceAuth.lastRejectedIp !== undefined &&
+    typeof deviceAuth.lastRejectedIp !== "string"
+  ) {
+    result.errors.push("Invalid device auth: lastRejectedIp must be a string");
+  }
+
+  if (
+    deviceAuth.lastRejectedReason !== undefined &&
+    typeof deviceAuth.lastRejectedReason !== "string"
+  ) {
+    result.errors.push(
+      "Invalid device auth: lastRejectedReason must be a string"
+    );
+  }
+
+  if (
+    deviceAuth.reloadVersion !== undefined &&
+    !Number.isInteger(deviceAuth.reloadVersion)
+  ) {
+    result.errors.push("Invalid device auth: reloadVersion must be an integer");
+  }
+
   return result;
 }
 

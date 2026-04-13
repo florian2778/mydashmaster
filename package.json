@@ -10,6 +10,7 @@
     "validate:examples": "node scripts/validate-example-layouts.js"
   },
   "dependencies": {
+    "dotenv": "^16.6.1",
     "ejs": "^3.1.10",
     "express": "^4.21.2"
   }

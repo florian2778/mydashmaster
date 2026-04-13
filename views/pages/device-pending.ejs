@@ -10,46 +10,116 @@
     <main class="pending-wrap">
       <p>Device</p>
       <p><code><%= deviceCode %></code></p>
-      <p>Access pending</p>
+      <p><%= message %></p>
+      <% if (note) { %>
+        <p class="pending-note"><%= note %></p>
+      <% } %>
     </main>
-    <script>
-      (async () => {
-        const storageKey = "mydashmaster-device-secret";
+    <% if (shouldPoll) { %>
+      <script>
+        (async () => {
+          const currentAccessState = <%- JSON.stringify(accessState) %>;
+          const storageKey = "mydashmaster-device-secret";
+          const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
+          let isChecking = false;
 
-        function createDeviceSecret() {
-          const bytes = new Uint8Array(32);
-          window.crypto.getRandomValues(bytes);
-          return Array.from(bytes, (byte) =>
-            byte.toString(16).padStart(2, "0")
-          ).join("");
-        }
-
-        let deviceSecret = window.localStorage.getItem(storageKey);
-
-        if (!deviceSecret) {
-          deviceSecret = createDeviceSecret();
-          window.localStorage.setItem(storageKey, deviceSecret);
-        }
-
-        try {
-          const response = await window.fetch("/api/device/<%= deviceCode %>/auth", {
-            body: JSON.stringify({ deviceSecret }),
-            credentials: "same-origin",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            method: "POST"
-          });
-
-          const payload = await response.json();
-
-          if (payload.status === "approved") {
-            window.location.reload();
+          function createDeviceSecret() {
+            const bytes = new Uint8Array(32);
+            window.crypto.getRandomValues(bytes);
+            return Array.from(bytes, (byte) =>
+              byte.toString(16).padStart(2, "0")
+            ).join("");
           }
-        } catch (error) {
-          console.error(error);
-        }
-      })();
-    </script>
+
+          function getDeviceSecret() {
+            let deviceSecret = window.localStorage.getItem(storageKey);
+
+            if (!deviceSecret) {
+              deviceSecret = createDeviceSecret();
+              window.localStorage.setItem(storageKey, deviceSecret);
+            }
+
+            return deviceSecret;
+          }
+
+          async function requestBootstrap(deviceSecret) {
+            const response = await window.fetch("/api/device/<%= deviceCode %>/auth", {
+              body: JSON.stringify({ deviceSecret }),
+              credentials: "same-origin",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              method: "POST"
+            });
+            const payload = await response.json();
+
+            return payload;
+          }
+
+          async function requestStatus() {
+            const response = await window.fetch("/api/device/<%= deviceCode %>/status", {
+              cache: "no-store",
+              credentials: "same-origin"
+            });
+
+            return response.json();
+          }
+
+          async function checkPendingState() {
+            if (isChecking) {
+              return;
+            }
+
+            isChecking = true;
+
+            try {
+              if (<%= shouldBootstrap ? "true" : "false" %>) {
+                const deviceSecret = getDeviceSecret();
+                const authPayload = await requestBootstrap(deviceSecret);
+
+                if (authPayload.status === "approved") {
+                  window.location.reload();
+                  return;
+                }
+              }
+
+              const statusPayload = await requestStatus();
+
+              if (!statusPayload || typeof statusPayload.accessState !== "string") {
+                return;
+              }
+
+              if (statusPayload.accessState === "authorized") {
+                window.location.reload();
+                return;
+              }
+
+              if (
+                statusPayload.accessState === "revoked" ||
+                statusPayload.accessState === "unknown"
+              ) {
+                window.location.reload();
+                return;
+              }
+
+              if (statusPayload.accessState !== currentAccessState) {
+                window.location.reload();
+              }
+            } catch (error) {
+              console.error(error);
+            } finally {
+              isChecking = false;
+            }
+          }
+
+          try {
+            await checkPendingState();
+            window.setInterval(checkPendingState, pollIntervalMs);
+          } catch (error) {
+            console.error(error);
+          }
+        })();
+      </script>
+    <% } %>
   </body>
 </html>

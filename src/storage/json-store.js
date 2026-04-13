@@ -284,6 +284,17 @@ async function recordDeviceActivity(deviceCode, lastKnownIp) {
   });
 }
 
+async function recordDeviceRejection(deviceCode, lastRejectedIp, lastRejectedReason) {
+  const now = new Date().toISOString();
+
+  return updateDeviceAuth(deviceCode, {
+    lastRejectedAt: now,
+    lastRejectedIp,
+    lastRejectedReason,
+    updatedAt: now
+  });
+}
+
 async function registerCandidateSecret(deviceCode, candidateSecretHash) {
   return updateDeviceAuth(deviceCode, {
     candidateSecretHash,
@@ -313,6 +324,24 @@ async function revokeDeviceAuth(deviceCode) {
   });
 }
 
+async function resetDevicePairing(deviceCode) {
+  return updateDeviceAuth(deviceCode, {
+    candidateSecretHash: undefined,
+    secretHash: undefined,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function requestDeviceReload(deviceCode) {
+  const deviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+
+  return updateDeviceAuth(deviceCode, {
+    ...deviceAuth,
+    reloadVersion: (deviceAuth.reloadVersion || 0) + 1,
+    updatedAt: new Date().toISOString()
+  });
+}
+
 async function listDeviceCodes() {
   await ensureDir(devicesDir);
 
@@ -337,7 +366,11 @@ async function listDevices() {
         hasCandidateSecret: Boolean(deviceAuth?.candidateSecretHash),
         hasSecret: Boolean(deviceAuth?.secretHash),
         lastConnectedAt: deviceAuth?.lastConnectedAt || null,
-        lastKnownIp: deviceAuth?.lastKnownIp || null
+        lastKnownIp: deviceAuth?.lastKnownIp || null,
+        lastRejectedAt: deviceAuth?.lastRejectedAt || null,
+        lastRejectedIp: deviceAuth?.lastRejectedIp || null,
+        lastRejectedReason: deviceAuth?.lastRejectedReason || null,
+        reloadVersion: deviceAuth?.reloadVersion || 0
       };
     })
   );
@@ -405,6 +438,9 @@ module.exports = {
   readLayout,
   readDevice,
   recordDeviceActivity,
+  recordDeviceRejection,
+  requestDeviceReload,
+  resetDevicePairing,
   registerCandidateSecret,
   revokeDeviceAuth,
   updateDevice,

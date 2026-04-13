@@ -1,0 +1,45 @@
+<%- include("../partials/header") %>
+
+<section class="panel">
+  <header class="admin-layouts-header">
+    <div>
+      <p class="admin-layouts-eyebrow">Admin</p>
+      <h1><%= heading %></h1>
+      <p class="admin-layouts-subtitle">
+        Assign a layout for device <code><%= device.deviceCode %></code>.
+      </p>
+    </div>
+    <a class="admin-secondary-link" href="/admin/devices">Back to devices</a>
+  </header>
+
+  <section class="admin-device-create admin-device-layout-panel">
+    <div>
+      <h2>Current Device</h2>
+      <p class="admin-layouts-subtitle">
+        Status: <strong><%= device.status %></strong>
+        · Current layout: <strong><%= device.layoutId || "none" %></strong>
+      </p>
+    </div>
+
+    <% if (errorMessage) { %>
+      <p class="admin-form-error"><%= errorMessage %></p>
+    <% } %>
+
+    <form class="admin-device-create-form" action="/admin/devices/<%= device.deviceCode %>/layout" method="post">
+      <label>
+        <span>Layout</span>
+        <select name="layoutId">
+          <option value="" <%= !device.layoutId ? "selected" : "" %>>No layout assigned</option>
+          <% layouts.forEach((layout) => { %>
+            <option value="<%= layout.layoutId %>" <%= layout.layoutId === device.layoutId ? "selected" : "" %>>
+              <%= layout.layoutId %>
+            </option>
+          <% }) %>
+        </select>
+      </label>
+      <button class="admin-action-button" type="submit">Save layout</button>
+    </form>
+  </section>
+</section>
+
+<%- include("../partials/footer") %>
