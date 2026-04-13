@@ -22,11 +22,16 @@ Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Devic
 - Device existiert, aber nicht freigegeben
 - Bootstrap aktiv
 - Polling aktiv
+- Bei Approval darf die Waiting Page nicht allein wegen `status = approved` ins Layout wechseln
+- Finaler Wechsel erst bei `accessState = authorized`
 
 ### not_paired
 - Device ist freigegeben, aber kein secretHash vorhanden
 - Re-Pairing erlaubt
 - Bootstrap aktiv
+- Erfolgreiches Re-Pairing schreibt einen neuen `secretHash` direkt als aktive Bindung
+- Erfolgreicher Bootstrap/Auth liefert direkt `approved` zurück und setzt die Session für den aktuellen Browser
+- Ergebnis danach: `authorized`
 
 ### auth_mismatch
 - Device ist gepairt, aber falscher Browser
@@ -70,6 +75,7 @@ Ein Device darf erst ins Layout wechseln, wenn:
 
 Nicht bei:
 - status = approved
+- status = approved und authorized = false
 
 ---
 
@@ -78,14 +84,19 @@ Nicht bei:
 ### pending
 - Bootstrap aktiv
 - Auto-Advance bei Erfolg
+- Status-Polling darf einen Reload nur auslösen, wenn `accessState` sich wirklich ändert
+- `status = approved` allein reicht nicht für den Reload
 
 ### not_paired
 - Bootstrap aktiv
 - Auto-Advance bei Erfolg
+- Erfolgreicher Auth-Call führt direkt zu `authorized`
+- Kein zusätzlicher Admin-Schritt nötig, solange das Device bereits `approved` ist
 
 ### auth_mismatch
 - Kein Bootstrap
 - Reload nur bei Zustandswechsel
+- Typischer Recovery-Pfad: Admin führt `Reset Pairing` aus, danach Wechsel zu `not_paired`
 
 ---
 
@@ -139,6 +150,41 @@ Empfohlene Struktur:
 - Status bleibt: approved
 - Ergebnis: not_paired
 - Device kann neu gekoppelt werden
+- Nächster erfolgreicher Bootstrap/Auth setzt einen neuen `secretHash`
+
+---
+
+## Auth Endpoint Regel
+
+- `pending`:
+  - speichert `candidateSecretHash`
+  - bleibt `pending`
+
+- `not_paired`:
+  - akzeptiert Bootstrap/Re-Pairing
+  - speichert Hash direkt als neuer `secretHash`
+  - setzt Session/Cookie für den aktuellen Browser
+  - Ergebnis: `authorized`
+
+- `auth_mismatch`:
+  - kein automatisches Re-Pairing
+  - nur Zustandswechsel durch Admin-Aktion
+
+---
+
+## Recovery-Regeln
+
+- `pending`:
+  - darf automatisch weiter pollen und bootstrapen
+  - nach Approval bleibt die Waiting Page aktiv, bis Auth erfolgreich ist
+
+- `not_paired`:
+  - darf automatisch re-pairen
+  - ein `401` auf dem Auth-Endpoint wäre hier falsch
+
+- `auth_mismatch`:
+  - darf nicht automatisch re-pairen
+  - Recovery nur über Admin-Aktion und anschließenden Zustandswechsel
 
 ---
 
