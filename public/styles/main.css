@@ -103,6 +103,7 @@ main.container {
 }
 
 .layout-node {
+  box-sizing: border-box;
   min-height: 0;
   min-width: 0;
 }
@@ -338,7 +339,16 @@ body.device-page .panel {
 }
 
 body.device-page .layout-canvas {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   flex: 1 1 auto;
+}
+
+body.device-page .layout-node--box {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .layout-preview-node {
