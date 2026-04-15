@@ -40,8 +40,11 @@ pre {
 .nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
+}
+
+.site-header .container {
+  justify-content: space-between;
 }
 
 .site-header-actions {
@@ -54,6 +57,30 @@ pre {
 .nav a {
   color: inherit;
   text-decoration: none;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.nav {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nav a {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  font-weight: 600;
+  padding: 0.45rem 0.8rem;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.nav a:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .header-logout-button {
@@ -597,6 +624,10 @@ body.device-page .layout-node--box {
 .auth-panel {
   margin: 3rem auto;
   max-width: 28rem;
+}
+
+.auth-panel--minimal {
+  margin-top: 6rem;
 }
 
 .auth-panel h1 {

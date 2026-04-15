@@ -772,6 +772,17 @@ test("admin routes redirect unauthenticated users to login", async () => {
   });
 });
 
+test("root route redirects to the canonical admin login route", async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(baseUrl, {
+      redirect: "manual"
+    });
+
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "/admin/login");
+  });
+});
+
 test("admin login rejects invalid credentials", async () => {
   await withAdminEnv(async () => {
     await withServer(async (baseUrl) => {

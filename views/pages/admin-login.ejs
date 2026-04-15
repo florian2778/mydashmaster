@@ -1,45 +1,48 @@
-<%- include("../partials/header") %>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= pageTitle %></title>
+    <link rel="stylesheet" href="/styles/main.css">
+  </head>
+  <body>
+    <main class="panel auth-panel auth-panel--minimal">
+      <% if (errorMessage) { %>
+        <p class="auth-error" role="alert"><%= errorMessage %></p>
+      <% } %>
 
-<section class="panel auth-panel">
-  <p class="admin-layouts-eyebrow">Admin</p>
-  <h1>Sign in</h1>
-  <p class="auth-subtitle">Use the configured admin credentials to access the dashboard.</p>
+      <% if (configError) { %>
+        <p class="auth-error" role="alert">
+          Admin authentication is not configured. Set <code>ADMIN_USERNAME</code>,
+          <code>ADMIN_PASSWORD_HASH</code>, and <code>ADMIN_SESSION_SECRET</code>.
+        </p>
+      <% } else { %>
+        <form class="auth-form" action="/admin/login" method="post">
+          <label>
+            Username
+            <input
+              autocomplete="username"
+              name="username"
+              required
+              type="text"
+              value="<%= usernameValue %>"
+            >
+          </label>
 
-  <% if (errorMessage) { %>
-    <p class="auth-error" role="alert"><%= errorMessage %></p>
-  <% } %>
+          <label>
+            Password
+            <input
+              autocomplete="current-password"
+              name="password"
+              required
+              type="password"
+            >
+          </label>
 
-  <% if (configError) { %>
-    <p class="auth-error" role="alert">
-      Admin authentication is not configured. Set <code>ADMIN_USERNAME</code>,
-      <code>ADMIN_PASSWORD_HASH</code>, and <code>ADMIN_SESSION_SECRET</code>.
-    </p>
-  <% } else { %>
-    <form class="auth-form" action="/admin/login" method="post">
-      <label>
-        Username
-        <input
-          autocomplete="username"
-          name="username"
-          required
-          type="text"
-          value="<%= usernameValue %>"
-        >
-      </label>
-
-      <label>
-        Password
-        <input
-          autocomplete="current-password"
-          name="password"
-          required
-          type="password"
-        >
-      </label>
-
-      <button class="admin-action-button" type="submit">Sign in</button>
-    </form>
-  <% } %>
-</section>
-
-<%- include("../partials/footer") %>
+          <button class="admin-action-button" type="submit">Sign in</button>
+        </form>
+      <% } %>
+    </main>
+  </body>
+</html>
