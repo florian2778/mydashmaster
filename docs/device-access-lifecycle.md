@@ -102,6 +102,9 @@ Nicht bei:
 
 ## Admin Panel Anforderungen
 
+Referenz für Heartbeat/Liveness:
+- `docs/device-heartbeat.md`
+
 ### Informationsanzeige pro Device
 
 - Status (pending / approved / revoked)
@@ -111,6 +114,12 @@ Nicht bei:
   - Datum (TT.MM.JJJ)
 - Letzte Status-Aktualisierung:
   - Sekunden seit letztem Kontakt
+
+Wichtige Präzisierung:
+- „letzter Zugriff“ und „letzte Status-Aktualisierung“ sind nicht dasselbe
+- Zugriff basiert auf erfolgreicher autorisierter Device-Nutzung
+- Status-Aktualisierung basiert auf Heartbeat/Polling
+- ein späteres `online`-Badge darf nur aus dem Heartbeat-Modell abgeleitet werden
 
 ---
 

@@ -149,6 +149,11 @@ Current target strategy:
 - lifecycle/access-state change:
   - full page reload / server-rendered transition
 
+Operational liveness:
+- a later admin-side `Seen` / `Online` indicator should be based on a dedicated heartbeat timestamp
+- heartbeat is separate from authorization and separate from `lastConnectedAt`
+- see `docs/device-heartbeat.md`
+
 ---
 
 ## Design Principles

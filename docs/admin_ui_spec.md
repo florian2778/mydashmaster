@@ -30,6 +30,7 @@ Diese Admin-UI ist gegen folgende Spezifikationen zu prüfen:
 
 - `docs/data-model.md`
 - `docs/device-access-lifecycle.md`
+- `docs/device-heartbeat.md`
 - `docs/device-layout-client-rerender.md`
 - `docs/architecture.md`
 
@@ -37,9 +38,10 @@ Priorität bei Konflikten:
 
 1. `data-model.md`
 2. `device-access-lifecycle.md`
-3. `device-layout-client-rerender.md`
-4. `architecture.md`
-5. `admin_ui_spec.md`
+3. `device-heartbeat.md`
+4. `device-layout-client-rerender.md`
+5. `architecture.md`
+6. `admin_ui_spec.md`
 
 Das bedeutet:
 - solange andere Dokumente nicht angepasst sind, darf dieses Dokument keine technisch falschen Annahmen erzwingen
@@ -311,6 +313,7 @@ Diese Darstellung ist nicht konsistent mit dem Lifecycle-Modell.
 
 Konflikt mit:
 - `docs/device-access-lifecycle.md`
+- `docs/device-heartbeat.md`
 
 Dort existieren:
 - `pending`
@@ -346,6 +349,11 @@ Die Devices Übersicht sollte stattdessen spezifizieren:
   - letzter Kontakt
   - letzte IP
   - letzte Ablehnung / Ablehnungsgrund
+
+Wichtige Ergänzung:
+- ein späteres `online`-Badge darf nicht aus `lastConnectedAt` abgeleitet werden
+- dafür ist ein separates Heartbeat-Feld erforderlich
+- siehe `docs/device-heartbeat.md`
 
 ### Weitere Lücke
 
