@@ -6,12 +6,14 @@ This document defines the JSON structure used by MyDashmaster.
 
 A layout consists of:
 - layoutId
+- layoutVersion
 - options (optional)
 - structure
 - boxes
 
 A device consists of:
 - deviceCode
+- description
 - status
 - layoutId
 
@@ -36,14 +38,21 @@ Example:
 
 {
   "deviceCode": "demo-device",
+  "description": "Meeting room display",
   "status": "approved",
   "layoutId": "layout-1"
 }
 
 Fields:
 - deviceCode (string)
+- description (string, optional)
 - status (string)
 - layoutId (string)
+
+`description` meaning:
+- human-readable label for admin use
+- used to identify the physical device or installation purpose
+- not used for authentication or routing
 
 status can be:
 - pending
@@ -113,9 +122,29 @@ Path: data/layouts/{layoutId}.json
 
 Fields:
 - layoutId (string)
+- layoutVersion (integer)
 - options (object, optional)
 - structure (object)
 - boxes (array)
+
+`layoutVersion` meaning:
+- monotonically increasing version number for the layout definition
+- used so active devices can detect layout changes even when `layoutId` stays the same
+- must increase whenever a layout is changed and saved
+
+Example:
+
+{
+  "layoutId": "layout-1",
+  "layoutVersion": 3,
+  "options": {
+    "showHeader": false,
+    "showStatus": false,
+    "showLayoutTitle": false
+  },
+  "structure": {},
+  "boxes": []
+}
 
 ---
 
@@ -281,3 +310,38 @@ Each layout should have:
 - preview graphic (approx. 240x135 px)
 - layoutId display
 - validation status (valid / warning / error)
+
+---
+
+## Layout Save Rules
+
+When a layout is edited and saved:
+
+1. the updated JSON must validate successfully
+2. `layoutId` remains stable for the same logical layout
+3. `layoutVersion` must increase
+
+Purpose:
+- active clients can detect layout changes even when the assigned `layoutId` does not change
+
+---
+
+## Layout Version Migration
+
+When `layoutVersion` is introduced into an existing installation:
+
+1. every existing `data/layouts/{layoutId}.json` file must receive a `layoutVersion`
+2. the initial migration value should be:
+   - `layoutVersion: 1`
+3. after migration, every real layout change increments the version:
+   - `1 -> 2 -> 3`
+
+Rules after migration:
+- missing `layoutVersion` is a model mismatch
+- invalid `layoutVersion` is a validation error
+- runtime must not silently guess `layoutVersion = 1`
+
+Purpose:
+- keep the model explicit
+- make outdated layout files visible
+- avoid hidden compatibility behavior

@@ -21,6 +21,11 @@ Responsible for:
 
 Access restricted via authentication.
 
+Admin entry routing:
+- canonical login route: `/admin/login`
+- convenience root route: `/`
+  - redirects to `/admin/login`
+
 ---
 
 ## 2. Public Device Renderer
@@ -33,6 +38,11 @@ Responsibilities:
 - check authorization
 - render layout or pending page
 - run polling for updates
+
+Routing separation:
+- `/` is not a public device route
+- `/d/{deviceCode}` remains the public device renderer entry
+- admin remains namespaced under `/admin`
 
 ---
 
@@ -56,6 +66,7 @@ users/
 
 A layout consists of:
 - layoutId
+- layoutVersion
 - options
 - structure
 - boxes
@@ -76,6 +87,7 @@ Boxes define iframe content:
 
 A device:
 - has a unique code
+- may have a human-readable description for admin use
 - has a status (pending, approved, revoked)
   - pending: device not yet approved
   - approved: device allowed with valid secret
@@ -121,7 +133,21 @@ A device:
 Devices poll:
 /api/device/{deviceCode}/status
 
-If layout changed → reload page
+Status responses should expose the assigned layout identity:
+- `layoutId`
+- `layoutVersion`
+
+If layout identity changed:
+- different `layoutId`
+- or same `layoutId` with different `layoutVersion`
+
+then the device updates the visible layout according to the current renderer strategy.
+
+Current target strategy:
+- `authorized -> authorized` layout identity change:
+  - client-side layout refresh
+- lifecycle/access-state change:
+  - full page reload / server-rendered transition
 
 ---
 

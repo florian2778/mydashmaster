@@ -61,7 +61,7 @@ Impact:
 
 ## Target Behavior
 
-When the device is already on the authorized layout page and polling detects a different `layoutId`:
+When the device is already on the authorized layout page and polling detects a changed layout identity:
 
 1. The page must remain loaded
 2. The client must request the updated layout render payload from the server
@@ -113,7 +113,9 @@ Client-side layout re-render is allowed only when all of the following are true:
 - current page is in `authorized` state
 - status endpoint still returns `authorized = true`
 - returned `accessState = authorized`
-- returned `layoutId` differs from the currently rendered layoutId
+- the current layout identity changed:
+  - returned `layoutId` differs from the currently rendered `layoutId`
+  - or returned `layoutVersion` differs from the currently rendered `layoutVersion`
 
 If any of these are not true, the device must fall back to the existing lifecycle behavior:
 
@@ -145,8 +147,22 @@ The status payload continues to provide:
 - `deviceCode`
 - `status`
 - `layoutId`
+- `layoutVersion`
 - `authorized`
 - `accessState`
+
+### Migration Safety
+
+The client re-render logic may only rely on `layoutVersion` after layout files have been migrated.
+
+Required rollout expectation:
+- existing layout files receive `layoutVersion: 1`
+- after that, the device status and fragment flow may treat `layoutId + layoutVersion` as the layout identity
+
+Mismatch handling:
+- missing `layoutVersion` must not be silently guessed by runtime logic
+- invalid `layoutVersion` must be treated as an invalid layout state
+- if the server cannot provide a valid layout identity, it should fail closed rather than inventing one
 
 ### Additional render source
 
@@ -188,12 +204,14 @@ Example:
 
 Recommended MVP rule:
 
-- keep the latest polled `layoutId` in client memory
-- require the fragment response to be attributable to the `layoutId` it represents
-- before applying a fetched fragment, compare it against the latest known `layoutId`
+- keep the latest polled render identity in client memory:
+  - `layoutId`
+  - `layoutVersion`
+- require the fragment response to be attributable to the layout identity it represents
+- before applying a fetched fragment, compare it against the latest known expected identity
 - if the fetched fragment is stale, discard it
 
-The fragment response must be associated with the requested `layoutId`.
+The fragment response must be associated with the requested layout identity.
 
 This association may be provided through a lightweight mechanism such as:
 
@@ -202,7 +220,11 @@ This association may be provided through a lightweight mechanism such as:
 - equivalent minimal metadata
 
 The transport is not fixed by this specification.
-The requirement is that the client can verify that the received fragment still belongs to the latest expected `layoutId` before applying it.
+The requirement is that the client can verify that the received fragment still belongs to the latest expected:
+- `layoutId`
+- `layoutVersion`
+
+before applying it.
 
 ### Prevent concurrent fragment updates
 
@@ -306,6 +328,11 @@ Recommended MVP fallback:
 - next poll retries
 - after 2-3 consecutive failures: full reload
 
+If the fragment or status flow encounters an invalid layout identity because of missing or malformed `layoutVersion`:
+- do not apply fragment replacement
+- keep the current layout visible if possible
+- let admin-facing validation surface the migration problem clearly
+
 Optional UX feedback during replacement:
 
 - a subtle loading indicator, fade, or lightweight overlay is allowed
@@ -335,7 +362,9 @@ Requirements:
 
 Only this case should use client-side re-render:
 
-- `authorized` -> `authorized` with different `layoutId`
+- `authorized` -> `authorized` with changed layout identity:
+  - different `layoutId`
+  - or same `layoutId` with different `layoutVersion`
 
 This is the normal case for layout assignment changes while the device remains valid and authorized.
 
@@ -482,10 +511,13 @@ Preferred implementation path:
 1. Add a fragment endpoint for authorized device layout content
 2. Mark one layout-root element on the device page
 3. Extend the existing polling script on the authorized page
-4. On `layoutId` change:
+4. On layout identity change:
    - fetch fragment
    - replace layout-root contents
-   - update current layoutId in client memory
+   - update current:
+     - `layoutId`
+     - `layoutVersion`
+     in client memory
 5. Guard against stale/in-flight updates before applying the fragment
 6. Keep full reload fallback for failures, admin-triggered reloads, or access-state changes
 
@@ -512,14 +544,10 @@ The client-side layout re-render is considered successful when:
 
 ## Future Note
 
-Later, a dedicated `layoutVersion` or similar field may become useful.
+`layoutVersion` is now part of the model.
 
-This is especially relevant if:
-
-- layout content changes without `layoutId` changing
-- the same logical layout is edited in place
-
-This is explicitly not required for the current MVP.
+Future optional extension:
+- more detailed revision metadata beyond a single integer `layoutVersion`
 
 ---
 
@@ -529,7 +557,7 @@ Desired model:
 
 - keep polling
 - keep server-rendered layout generation
-- replace only layout content on `authorized -> authorized` layout changes
+- replace only layout content on `authorized -> authorized` layout identity changes
 - keep full reload for lifecycle/access-state transitions
 - allow an admin-triggered reload fallback through the existing status channel
 

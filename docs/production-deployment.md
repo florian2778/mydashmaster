@@ -148,6 +148,12 @@ They must not be treated as identity or authorization factors.
 - optional rate limiting for `/admin/login`
 - optional IP restrictions for `/admin`
 
+Routing note:
+- `/` may redirect to `/admin/login`
+- security policies should still target the canonical admin namespace:
+  - `/admin`
+  - `/admin/login`
+
 Traefik should strengthen the deployment edge, but it does not replace the app’s own authentication and lifecycle logic.
 
 ---

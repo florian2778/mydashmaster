@@ -41,6 +41,8 @@
 
 ### Admin
 - login required
+- canonical login route: `/admin/login`
+- convenience redirect: `/` -> `/admin/login`
 - manage layouts
 - manage devices
 
@@ -63,4 +65,3 @@
 - no database
 - minimal dependencies
 - clear structure
-
