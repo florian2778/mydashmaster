@@ -1,5 +1,6 @@
 {
   "layoutId": "layout-3",
+  "layoutVersion": 2,
   "options": {
     "showHeader": false,
     "showStatus": false,
@@ -10,21 +11,21 @@
     "gap": "0px",
     "children": [
       {
-	"type": "column",
-	"size": "50%",
-	"gap": "0px",
-	"children": [
-	  {
+        "type": "column",
+        "size": "50%",
+        "gap": "0px",
+        "children": [
+          {
             "type": "box",
             "box": "box1",
             "size": "50%"
-	  },
-	  {
+          },
+          {
             "type": "box",
-	    "box": "box3",
-	    "size": "50%"
-	  }
-	]
+            "box": "box3",
+            "size": "50%"
+          }
+        ]
       },
       {
         "type": "box",

@@ -1,5 +1,6 @@
 {
   "layoutId": "three-level-nested",
+  "layoutVersion": 1,
   "options": {
     "showHeader": true,
     "showStatus": true,

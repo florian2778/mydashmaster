@@ -1,5 +1,6 @@
 {
   "layoutId": "two-columns-50-50",
+  "layoutVersion": 1,
   "options": {
     "showHeader": false,
     "showStatus": false,

@@ -1,5 +1,6 @@
 {
   "layoutId": "layout-1",
+  "layoutVersion": 2,
   "options": {
     "showHeader": false,
     "showStatus": false,

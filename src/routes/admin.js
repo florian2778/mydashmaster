@@ -19,11 +19,14 @@ const {
   listDevices,
   listLayouts,
   readDevice,
+  readLayoutRecord,
   requestDeviceReload,
   resetDevicePairing,
   revokeDeviceAuth,
-  updateDevice
+  updateDevice,
+  writeLayout
 } = require("../storage/json-store");
+const { validateLayout } = require("../storage/validators");
 
 const router = express.Router();
 
@@ -84,6 +87,123 @@ function mapDeviceCard(device) {
 
 function getAssignableLayouts(layouts) {
   return layouts.filter((layout) => layout.status !== "error");
+}
+
+function getLayoutVersionDisplay(layoutRecord) {
+  if (layoutRecord.layoutVersionState === "valid") {
+    return String(layoutRecord.layoutVersion);
+  }
+
+  return "migration required";
+}
+
+function getLayoutVersionNote(layoutRecord) {
+  if (layoutRecord.layoutVersionState === "missing") {
+    return "layoutVersion is missing. This layout needs migration before normal save flow is reliable.";
+  }
+
+  if (layoutRecord.layoutVersionState === "invalid") {
+    return "layoutVersion is invalid. Use edit mode to correct it before saving.";
+  }
+
+  return null;
+}
+
+function buildLayoutDraftValidation(layoutId, jsonContent) {
+  let parsedLayout = null;
+  let parseError = null;
+  let validation = {
+    errors: [],
+    warnings: []
+  };
+
+  try {
+    parsedLayout = JSON.parse(jsonContent);
+    validation = validateLayout(parsedLayout);
+  } catch (error) {
+    parseError = error.message;
+    validation.errors.push(`Invalid JSON: ${error.message}`);
+  }
+
+  if (parsedLayout && parsedLayout.layoutId !== layoutId) {
+    validation.errors.push(`layoutId must remain "${layoutId}"`);
+  }
+
+  const status =
+    validation.errors.length > 0
+      ? "error"
+      : validation.warnings.length > 0
+        ? "warning"
+        : "valid";
+
+  return {
+    jsonContent,
+    parsedLayout,
+    parseError,
+    status,
+    validation
+  };
+}
+
+function buildLayoutUsageDevices(devices, layoutId) {
+  return devices
+    .filter((device) => device.layoutId === layoutId)
+    .map((device) => ({
+      description: device.description || null,
+      deviceCode: device.deviceCode,
+      status: device.status
+    }));
+}
+
+function getReadableLayoutJson(layoutRecord) {
+  if (!layoutRecord) {
+    return "";
+  }
+
+  if (layoutRecord.layout) {
+    return JSON.stringify(layoutRecord.layout, null, 2);
+  }
+
+  return layoutRecord.rawContent;
+}
+
+async function renderLayoutDetailPage(res, layoutId, options = {}) {
+  const {
+    editMode = false,
+    draftResult = null,
+    httpStatus = 200
+  } = options;
+
+  const [layoutRecord, devices] = await Promise.all([
+    readLayoutRecord(layoutId),
+    listDevices()
+  ]);
+
+  if (!layoutRecord) {
+    return res.status(404).render("pages/admin-layout-not-found", {
+      heading: "Unknown layout",
+      layoutId,
+      pageTitle: "Unknown layout"
+    });
+  }
+
+  const validationSource = draftResult?.validation || layoutRecord.validation;
+  const status = draftResult?.status || layoutRecord.status;
+
+  return res.status(httpStatus).render("pages/admin-layout-detail", {
+    draftJsonContent:
+      draftResult?.jsonContent || getReadableLayoutJson(layoutRecord),
+    editMode,
+    heading: "Layout Detail",
+    layout: layoutRecord,
+    layoutUsageDevices: buildLayoutUsageDevices(devices, layoutRecord.layoutId),
+    pageTitle: layoutRecord.layoutId,
+    validationErrors: validationSource.errors,
+    validationStatus: status,
+    validationWarnings: validationSource.warnings,
+    versionDisplay: getLayoutVersionDisplay(layoutRecord),
+    versionNote: getLayoutVersionNote(layoutRecord)
+  });
 }
 
 function renderLoginPage(res, options = {}) {
@@ -170,6 +290,73 @@ router.get("/layouts", async (req, res, next) => {
       pageTitle: "Layouts",
       heading: "Layouts",
       layouts
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/layouts/:layoutId", async (req, res, next) => {
+  try {
+    const { layoutId } = req.params;
+    const editMode = req.query.mode === "edit";
+
+    await renderLayoutDetailPage(res, layoutId, {
+      editMode
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/layouts/:layoutId", async (req, res, next) => {
+  try {
+    const { layoutId } = req.params;
+    const intent =
+      typeof req.body?.intent === "string" ? req.body.intent : "validate";
+    const jsonContent =
+      typeof req.body?.jsonContent === "string" ? req.body.jsonContent : "";
+    const layoutRecord = await readLayoutRecord(layoutId);
+
+    if (!layoutRecord) {
+      return res.status(404).render("pages/admin-layout-not-found", {
+        heading: "Unknown layout",
+        layoutId,
+        pageTitle: "Unknown layout"
+      });
+    }
+
+    if (intent === "cancel") {
+      return res.redirect(`/admin/layouts/${layoutId}`);
+    }
+
+    const draftResult = buildLayoutDraftValidation(layoutId, jsonContent);
+
+    if (intent === "save") {
+      if (draftResult.validation.errors.length > 0 || !draftResult.parsedLayout) {
+        return renderLayoutDetailPage(res, layoutId, {
+          draftResult,
+          editMode: true,
+          httpStatus: 400
+        });
+      }
+
+      const nextLayoutVersion = Number.isInteger(layoutRecord.layoutVersion)
+        ? layoutRecord.layoutVersion + 1
+        : draftResult.parsedLayout.layoutVersion;
+
+      await writeLayout(layoutId, {
+        ...draftResult.parsedLayout,
+        layoutId,
+        layoutVersion: nextLayoutVersion
+      });
+
+      return res.redirect(`/admin/layouts/${layoutId}`);
+    }
+
+    return renderLayoutDetailPage(res, layoutId, {
+      draftResult,
+      editMode: true
     });
   } catch (error) {
     next(error);

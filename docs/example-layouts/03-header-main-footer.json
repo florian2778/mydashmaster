@@ -1,5 +1,6 @@
 {
   "layoutId": "header-main-footer",
+  "layoutVersion": 1,
   "options": {
     "showHeader": true,
     "showStatus": false,

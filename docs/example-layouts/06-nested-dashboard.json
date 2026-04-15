@@ -1,5 +1,6 @@
 {
   "layoutId": "nested-dashboard",
+  "layoutVersion": 1,
   "options": {
     "showHeader": false,
     "showStatus": false,

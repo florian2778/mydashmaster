@@ -1,5 +1,6 @@
 {
   "layoutId": "top-bottom-with-sidebar",
+  "layoutVersion": 1,
   "options": {
     "showHeader": false,
     "showStatus": true,

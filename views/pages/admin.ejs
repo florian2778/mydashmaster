@@ -1,24 +1,26 @@
 <%- include("../partials/header") %>
 
-<section class="panel">
-  <h1><%= heading %></h1>
-  <p>Admin overview for layout and device management.</p>
-  <% if (appRevision) { %>
-    <p><strong>Revision:</strong> <code><%= appRevision %></code></p>
-  <% } %>
+<section class="panel admin-home-panel">
+  <header class="admin-home-header">
+    <h1><%= heading %></h1>
+    <p>Choose the area you want to manage.</p>
+    <% if (appRevision) { %>
+      <p class="admin-home-revision">Revision <code><%= appRevision %></code></p>
+    <% } %>
+  </header>
 
-  <section class="admin-overview-grid">
-    <article class="admin-overview-card">
-      <h2>Layouts</h2>
-      <p><strong><%= layoutCount %></strong> layout<%= layoutCount === 1 ? "" : "s" %> available.</p>
-      <p><a href="/admin/layouts">Open layout overview</a></p>
-    </article>
+  <section class="admin-home-grid">
+    <a class="admin-home-card" href="/admin/devices">
+      <span class="admin-home-card__label">Devices</span>
+      <strong class="admin-home-card__count"><%= deviceCount %></strong>
+      <span class="admin-home-card__meta">Registered device<%= deviceCount === 1 ? "" : "s" %></span>
+    </a>
 
-    <article class="admin-overview-card">
-      <h2>Devices</h2>
-      <p><strong><%= deviceCount %></strong> device<%= deviceCount === 1 ? "" : "s" %> registered.</p>
-      <p><a href="/admin/devices">Open device overview</a></p>
-    </article>
+    <a class="admin-home-card" href="/admin/layouts">
+      <span class="admin-home-card__label">Layouts</span>
+      <strong class="admin-home-card__count"><%= layoutCount %></strong>
+      <span class="admin-home-card__meta">Available layout<%= layoutCount === 1 ? "" : "s" %></span>
+    </a>
   </section>
 </section>
 

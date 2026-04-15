@@ -56,6 +56,22 @@ function countStructureBoxes(node) {
   );
 }
 
+function getLayoutVersionState(layout) {
+  if (!layout || typeof layout !== "object") {
+    return "missing";
+  }
+
+  if (layout.layoutVersion === undefined) {
+    return "missing";
+  }
+
+  if (!Number.isInteger(layout.layoutVersion)) {
+    return "invalid";
+  }
+
+  return "valid";
+}
+
 function assertMatchingId(actualValue, expectedValue, fieldName, subject) {
   if (actualValue === expectedValue) {
     return;
@@ -97,31 +113,30 @@ async function readDevice(deviceCode) {
 }
 
 async function readLayout(layoutId) {
-  await ensureDir(layoutsDir);
+  const layoutRecord = await readLayoutRecord(layoutId);
 
-  const filePath = path.join(layoutsDir, `${layoutId}.json`);
+  if (!layoutRecord) {
+    return null;
+  }
 
-  try {
-    const layout = await readJsonFile(filePath);
-    const validation = validateLayout(layout);
-
-    assertValid(validation, "layout");
-    assertMatchingId(layout.layoutId, layoutId, "layoutId", "layout");
-
-    if (validation.warnings.length > 0) {
-      console.warn(
-        `Layout validation warnings for ${layoutId}: ${validation.warnings.join("; ")}`
-      );
-    }
-
-    return layout;
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return null;
-    }
-
+  if (layoutRecord.parseError) {
+    const error = new Error(`Invalid layout: ${layoutRecord.parseError}`);
+    error.name = "ValidationError";
     throw error;
   }
+
+  const { layout, validation } = layoutRecord;
+
+  assertValid(validation, "layout");
+  assertMatchingId(layout.layoutId, layoutId, "layoutId", "layout");
+
+  if (validation.warnings.length > 0) {
+    console.warn(
+      `Layout validation warnings for ${layoutId}: ${validation.warnings.join("; ")}`
+    );
+  }
+
+  return layout;
 }
 
 async function readDeviceAuth(deviceCode) {
@@ -226,6 +241,75 @@ async function updateDevice(deviceCode, updates) {
     ...updates,
     deviceCode
   });
+}
+
+async function readLayoutRecord(layoutId) {
+  await ensureDir(layoutsDir);
+
+  const filePath = path.join(layoutsDir, `${layoutId}.json`);
+
+  try {
+    const rawContent = await fs.readFile(filePath, "utf8");
+    let layout = null;
+    let parseError = null;
+    let validation = { errors: [], warnings: [] };
+
+    try {
+      layout = JSON.parse(rawContent);
+      validation = validateLayout(layout);
+    } catch (error) {
+      parseError = error.message;
+      validation = {
+        errors: [`Invalid JSON: ${error.message}`],
+        warnings: []
+      };
+    }
+
+    const resolvedLayoutId =
+      typeof layout?.layoutId === "string" ? layout.layoutId : layoutId;
+    const boxes = Array.isArray(layout?.boxes) ? layout.boxes : [];
+    const structure =
+      layout && typeof layout === "object" ? layout.structure || null : null;
+
+    return {
+      boxCount: boxes.length,
+      boxes,
+      errors: validation.errors,
+      filePath,
+      isNeutralPreview:
+        boxes.length === 0 || countStructureBoxes(structure) === 0,
+      layout,
+      layoutId: resolvedLayoutId,
+      layoutVersion:
+        layout && typeof layout === "object" ? layout.layoutVersion : undefined,
+      layoutVersionState: getLayoutVersionState(layout),
+      parseError,
+      rawContent,
+      status: parseError ? "error" : getLayoutStatus(validation),
+      structure,
+      validation,
+      warnings: validation.warnings
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function writeLayout(layoutId, layout) {
+  await ensureDir(layoutsDir);
+
+  const validation = validateLayout(layout);
+  assertValid(validation, "layout");
+  assertMatchingId(layout.layoutId, layoutId, "layoutId", "layout");
+
+  const filePath = path.join(layoutsDir, `${layoutId}.json`);
+  await writeJsonFile(filePath, layout);
+
+  return layout;
 }
 
 async function createAdminDevice({ layoutId } = {}) {
@@ -388,25 +472,21 @@ async function listLayouts() {
     fileEntries.map(async (entry) => {
       const fileName = entry.name;
       const fallbackLayoutId = fileName.replace(/\.json$/, "");
-      const filePath = path.join(layoutsDir, fileName);
 
       try {
-        const layout = await readJsonFile(filePath);
-        const validation = validateLayout(layout);
+        const layoutRecord = await readLayoutRecord(fallbackLayoutId);
 
         return {
-          layoutId:
-            typeof layout.layoutId === "string" ? layout.layoutId : fallbackLayoutId,
-          boxes: Array.isArray(layout.boxes) ? layout.boxes : [],
-          status: getLayoutStatus(validation),
-          boxCount: Array.isArray(layout.boxes) ? layout.boxes.length : 0,
-          errors: validation.errors,
-          warnings: validation.warnings,
-          isNeutralPreview:
-            !Array.isArray(layout.boxes) ||
-            layout.boxes.length === 0 ||
-            countStructureBoxes(layout.structure) === 0,
-          structure: layout.structure || null
+          boxCount: layoutRecord.boxCount,
+          boxes: layoutRecord.boxes,
+          errors: layoutRecord.errors,
+          isNeutralPreview: layoutRecord.isNeutralPreview,
+          layoutId: layoutRecord.layoutId || fallbackLayoutId,
+          layoutVersion: layoutRecord.layoutVersion,
+          layoutVersionState: layoutRecord.layoutVersionState,
+          status: layoutRecord.status,
+          structure: layoutRecord.structure,
+          warnings: layoutRecord.warnings
         };
       } catch (error) {
         return {
@@ -435,6 +515,7 @@ module.exports = {
   listDeviceCodes,
   listLayouts,
   readDeviceAuth,
+  readLayoutRecord,
   readLayout,
   readDevice,
   recordDeviceActivity,
@@ -445,5 +526,6 @@ module.exports = {
   revokeDeviceAuth,
   updateDevice,
   updateDeviceAuth,
+  writeLayout,
   writeDevice
 };

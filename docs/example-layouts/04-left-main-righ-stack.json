@@ -1,5 +1,6 @@
 {
   "layoutId": "left-main-right-stack",
+  "layoutVersion": 1,
   "options": {
     "showHeader": true,
     "showStatus": true,

@@ -1,5 +1,6 @@
 {
   "layoutId": "layout-4",
+  "layoutVersion": 1,
   "options": {
     "showHeader": false,
     "showStatus": false,

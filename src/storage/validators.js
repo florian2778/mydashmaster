@@ -51,6 +51,14 @@ function validateDevice(device) {
   }
 
   if (
+    device.description !== undefined &&
+    device.description !== null &&
+    typeof device.description !== "string"
+  ) {
+    result.errors.push("Invalid device: description must be a string");
+  }
+
+  if (
     device.layoutId !== undefined &&
     device.layoutId !== null &&
     typeof device.layoutId !== "string"
@@ -272,6 +280,12 @@ function validateLayout(layout) {
 
   if (typeof layout.layoutId !== "string") {
     result.errors.push("Invalid layout: layoutId must be a string");
+  }
+
+  if (layout.layoutVersion === undefined) {
+    result.errors.push("Invalid layout: layoutVersion is required");
+  } else if (!Number.isInteger(layout.layoutVersion)) {
+    result.errors.push("Invalid layout: layoutVersion must be an integer");
   }
 
   if (layout.options !== undefined) {

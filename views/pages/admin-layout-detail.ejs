@@ -1,0 +1,104 @@
+<%- include("../partials/header") %>
+
+<section class="panel admin-layout-detail-panel">
+  <header class="admin-layout-detail-header">
+    <div class="admin-layout-detail-heading">
+      <div class="admin-layout-detail-titleline">
+        <h1><%= layout.layoutId %></h1>
+        <span class="layout-status layout-status--<%= validationStatus %>">
+          <%= validationStatus %>
+        </span>
+      </div>
+      <p class="admin-layout-detail-version">layoutVersion: <strong><%= versionDisplay %></strong></p>
+      <% if (versionNote) { %>
+        <p class="admin-layout-detail-migration-note"><%= versionNote %></p>
+      <% } %>
+    </div>
+
+    <div class="admin-layout-detail-actions">
+      <% if (editMode) { %>
+        <a class="admin-secondary-link" href="/admin/layouts/<%= layout.layoutId %>">Back to read-only</a>
+      <% } else { %>
+        <a class="admin-secondary-link" href="/admin/layouts">Back to layouts</a>
+        <a class="admin-action-button" href="/admin/layouts/<%= layout.layoutId %>?mode=edit">Edit</a>
+      <% } %>
+    </div>
+  </header>
+
+  <section class="admin-layout-detail-section">
+    <h2>Validation</h2>
+
+    <% if (validationStatus === "valid") { %>
+      <p class="admin-layout-detail-empty">Layout validation passed without warnings.</p>
+    <% } else { %>
+      <% if (validationErrors.length > 0) { %>
+        <div class="admin-layout-validation admin-layout-validation--error">
+          <strong>Errors</strong>
+          <ul class="admin-layout-validation-list">
+            <% validationErrors.forEach((message) => { %>
+              <li><%= message %></li>
+            <% }) %>
+          </ul>
+        </div>
+      <% } %>
+
+      <% if (validationWarnings.length > 0) { %>
+        <div class="admin-layout-validation admin-layout-validation--warning">
+          <strong>Warnings</strong>
+          <ul class="admin-layout-validation-list">
+            <% validationWarnings.forEach((message) => { %>
+              <li><%= message %></li>
+            <% }) %>
+          </ul>
+        </div>
+      <% } %>
+    <% } %>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <h2>Used by devices</h2>
+
+    <% if (layoutUsageDevices.length === 0) { %>
+      <p class="admin-layout-detail-empty">No device currently uses this layout.</p>
+    <% } else { %>
+      <div class="admin-layout-usage-list">
+        <% layoutUsageDevices.forEach((device) => { %>
+          <article class="admin-layout-usage-card">
+            <strong><%= device.deviceCode %></strong>
+            <% if (device.description) { %>
+              <span><strong>Description:</strong> <%= device.description %></span>
+            <% } %>
+            <span class="admin-layout-usage-status"><strong>Status:</strong> <%= device.status %></span>
+          </article>
+        <% }) %>
+      </div>
+    <% } %>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Configuration</h2>
+      <% if (editMode) { %>
+        <span class="admin-layout-mode-indicator">Edit mode</span>
+      <% } else { %>
+        <span class="admin-layout-mode-indicator admin-layout-mode-indicator--readonly">Read-only</span>
+      <% } %>
+    </div>
+
+    <% if (editMode) { %>
+      <form action="/admin/layouts/<%= layout.layoutId %>" method="post" class="admin-layout-editor-form">
+        <label class="admin-layout-editor-label" for="jsonContent">Layout JSON</label>
+        <textarea id="jsonContent" name="jsonContent" class="admin-layout-editor"><%= draftJsonContent %></textarea>
+        <div class="admin-layout-editor-actions">
+          <button class="admin-action-button admin-action-button--secondary" type="submit" name="intent" value="validate">Validate</button>
+          <button class="admin-action-button" type="submit" name="intent" value="save">Save</button>
+          <button class="admin-action-button admin-action-button--secondary" type="submit" name="intent" value="cancel">Cancel</button>
+        </div>
+      </form>
+    <% } else { %>
+      <pre class="admin-layout-config"><%= draftJsonContent %></pre>
+    <% } %>
+  </section>
+</section>
+
+<%- include("../partials/footer") %>

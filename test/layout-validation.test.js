@@ -18,6 +18,7 @@ function createBox(name) {
 function createValidLayout() {
   return {
     layoutId: "test-layout",
+    layoutVersion: 1,
     options: {
       showHeader: false,
       showStatus: false,
@@ -173,4 +174,22 @@ test("unused boxes return a warning", () => {
 
   assert.equal(result.errors.length, 0);
   assert.match(result.warnings[0], /"box3" is unused/);
+});
+
+test("missing layoutVersion returns an error", () => {
+  const layout = createValidLayout();
+  delete layout.layoutVersion;
+
+  const result = validateLayout(layout);
+
+  assert.match(result.errors[0], /layoutVersion is required/);
+});
+
+test("invalid layoutVersion returns an error", () => {
+  const layout = createValidLayout();
+  layout.layoutVersion = "1";
+
+  const result = validateLayout(layout);
+
+  assert.match(result.errors[0], /layoutVersion must be an integer/);
 });
