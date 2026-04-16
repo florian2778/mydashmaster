@@ -539,6 +539,17 @@ body.device-page .layout-node--box {
   padding: 1rem;
 }
 
+.device-overview-link {
+  color: inherit;
+  display: block;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.device-overview-link:hover h2 {
+  text-decoration: underline;
+}
+
 .device-overview-meta {
   display: grid;
   gap: 0.65rem;
@@ -669,6 +680,11 @@ body.device-page .layout-node--box {
   gap: 1rem;
 }
 
+.admin-device-detail-panel {
+  display: grid;
+  gap: 1rem;
+}
+
 .admin-layout-detail-header {
   align-items: flex-start;
   border-bottom: 1px solid #e3eaf1;
@@ -731,6 +747,44 @@ body.device-page .layout-node--box {
 .admin-layout-detail-empty {
   color: #52606d;
   margin: 0;
+}
+
+.admin-device-detail-summary {
+  color: #52606d;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+}
+
+.admin-device-client-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-device-client-card {
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem;
+}
+
+.admin-device-client-card--official {
+  background: #f8fafc;
+}
+
+.admin-device-detail-layout-form {
+  margin-bottom: 0;
+}
+
+.admin-device-detail-layout-form h3 {
+  margin: 0;
+}
+
+.admin-device-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
 }
 
 .admin-layout-validation {

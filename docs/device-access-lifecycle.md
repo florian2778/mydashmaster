@@ -26,15 +26,17 @@ Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Devic
 - Finaler Wechsel erst bei `accessState = authorized`
 
 ### not_paired
-- Device ist freigegeben, aber kein secretHash vorhanden
-- Re-Pairing erlaubt
+- Device ist freigegeben, aber aktuell kein paired active client existiert
+- nach `Reset Pairing` wird der aktive `secretHash` entfernt
+- danach entsteht der nächste aktive `secretHash` erst wieder durch erfolgreichen Bootstrap/Auth
+- Re-Pairing / Recovery erlaubt
 - Bootstrap aktiv
-- Erfolgreiches Re-Pairing schreibt einen neuen `secretHash` direkt als aktive Bindung
-- Erfolgreicher Bootstrap/Auth liefert direkt `approved` zurück und setzt die Session für den aktuellen Browser
-- Ergebnis danach: `authorized`
+- Erfolgreicher Bootstrap/Auth validiert den Secret-Flow und setzt oder erneuert die Session für den aktuellen Browser
+- Ergebnis danach zunächst weiter: `not_paired`
+- offizieller Zugriff entsteht erst nach expliziter Admin-Pairing-Aktion für diesen `clientId`
 
 ### auth_mismatch
-- Device ist gepairt, aber falscher Browser
+- Device hat bereits einen paired active client, aber dieser Browser ist nicht der offizielle Client
 - Kein Bootstrap
 - Nur Polling
 
@@ -55,7 +57,7 @@ Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Devic
 - authorized → not_paired (Reset pairing)
 - authorized → revoked (Revoke)
 - auth_mismatch → not_paired (Reset pairing)
-- not_paired → authorized (Re-Pairing)
+- not_paired → authorized (Auth/Session erfolgreich + explizites Admin-Pairing)
 
 ---
 
@@ -65,6 +67,33 @@ Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Devic
 - not_paired muss immer recoverbar sein
 - auth_mismatch darf nicht automatisch re-pairen
 - revoked ist final (bis Admin eingreift)
+
+### Mehrere Browser-Clients pro deviceCode
+
+Mehrere Browser-Clients pro `deviceCode` sind möglich.
+
+Dabei gilt:
+- genau EIN paired active client existiert
+- weitere Browser-Clients sind client-level observations
+
+Diese client-level observations sind:
+- pending
+- auth_mismatch
+- revoked
+- not_paired
+
+Wichtige Präzisierung:
+- diese Zustände sind keine konkurrierenden Device-Zustände
+- sie sind client-level observations
+- nur der paired active client repräsentiert den offiziellen Device-Zugriff
+- zusätzliche Browser gelten als additional unpaired client activity
+- genau ein Client darf `isPairedClient = true` haben
+- wenn ein neuer Client paired active client wird, verliert der bisherige Client `isPairedClient = true` sofort
+
+Definition des paired active client:
+- der paired active client ist der einzelne offizielle Client-Kontext für ein `deviceCode`
+- er liefert den official device heartbeat
+- er ist nicht nur „ein weiterer gültiger Browser“, sondern die exklusive offizielle Client-Zuordnung
 
 ---
 
@@ -89,9 +118,9 @@ Nicht bei:
 
 ### not_paired
 - Bootstrap aktiv
-- Auto-Advance bei Erfolg
-- Erfolgreicher Auth-Call führt direkt zu `authorized`
-- Kein zusätzlicher Admin-Schritt nötig, solange das Device bereits `approved` ist
+- kein Auto-Advance allein wegen erfolgreichem Auth-Call
+- Erfolgreicher Auth-Call setzt oder erneuert nur die Session für den aktuellen Browser
+- Device bleibt `not_paired`, bis Admin diesen `clientId` explizit pairt
 
 ### auth_mismatch
 - Kein Bootstrap
@@ -118,8 +147,9 @@ Referenz für Heartbeat/Liveness:
 Wichtige Präzisierung:
 - „letzter Zugriff“ und „letzte Status-Aktualisierung“ sind nicht dasselbe
 - Zugriff basiert auf erfolgreicher autorisierter Device-Nutzung
-- Status-Aktualisierung basiert auf Heartbeat/Polling
+- Status-Aktualisierung basiert auf dem official device heartbeat
 - ein späteres `online`-Badge darf nur aus dem Heartbeat-Modell abgeleitet werden
+- additional unpaired client activity darf `Seen` und `Online` nicht beeinflussen
 
 ---
 
@@ -158,8 +188,13 @@ Empfohlene Struktur:
   - candidateSecretHash
 - Status bleibt: approved
 - Ergebnis: not_paired
+- alle Clients verlieren `isPairedClient = true`
+- alle Clients werden `accessState = not_paired`
+- alle Clients verlieren ihr bisheriges Auth-/Session-Evidence (`lastAuthenticatedAt`)
 - Device kann neu gekoppelt werden
-- Nächster erfolgreicher Bootstrap/Auth setzt einen neuen `secretHash`
+- nächster erfolgreicher Bootstrap/Auth setzt einen neuen aktiven `secretHash` und die Session für den Browser
+- ein später explizit gepairter Client wird der neue paired active client
+- ein zuvor markierter paired active client verliert dabei sofort `isPairedClient = true`
 
 ---
 
@@ -170,10 +205,11 @@ Empfohlene Struktur:
   - bleibt `pending`
 
 - `not_paired`:
-  - akzeptiert Bootstrap/Re-Pairing
-  - speichert Hash direkt als neuer `secretHash`
-  - setzt Session/Cookie für den aktuellen Browser
-  - Ergebnis: `authorized`
+  - akzeptiert Bootstrap/Auth
+  - validiert `secretHash`
+  - setzt oder erneuert Session/Cookie für den aktuellen Browser
+  - Ergebnis bleibt zunächst: `not_paired`
+  - offizieller Zugriff entsteht erst nach explizitem Admin-Pairing
 
 - `auth_mismatch`:
   - kein automatisches Re-Pairing
@@ -188,8 +224,9 @@ Empfohlene Struktur:
   - nach Approval bleibt die Waiting Page aktiv, bis Auth erfolgreich ist
 
 - `not_paired`:
-  - darf automatisch re-pairen
-  - ein `401` auf dem Auth-Endpoint wäre hier falsch
+  - darf automatisch bootstrapen / authentifizieren
+  - ein `401` auf dem Auth-Endpoint wäre hier falsch, solange der Secret korrekt ist
+  - bleibt bis zum expliziten Admin-Pairing `not_paired`
 
 - `auth_mismatch`:
   - darf nicht automatisch re-pairen

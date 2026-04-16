@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   clearDeviceSessionCookie,
+  ensureDeviceClientId,
   getRequestIp,
   hasValidDeviceSession
 } = require("../auth/device-auth");
@@ -15,7 +16,7 @@ const {
 
 const router = express.Router();
 
-function renderAccessState(res, deviceCode, accessState) {
+function renderAccessState(res, deviceCode, accessState, options = {}) {
   const states = {
     auth_mismatch: {
       message: "Access not available in this browser",
@@ -52,6 +53,7 @@ function renderAccessState(res, deviceCode, accessState) {
 
   return res.render("pages/device-pending", {
     accessState,
+    clientId: options.clientId || null,
     deviceCode,
     message: state.message,
     note: state.note,
@@ -64,6 +66,7 @@ function renderAccessState(res, deviceCode, accessState) {
 router.get("/:deviceCode", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
+    const clientId = ensureDeviceClientId(req, res);
     const device = await readDevice(deviceCode);
 
     if (!device) {
@@ -84,14 +87,34 @@ router.get("/:deviceCode", async (req, res, next) => {
       return renderAccessState(res, deviceCode, "pending");
     }
 
-    const deviceAuth = await readDeviceAuth(deviceCode);
+    let deviceAuth = await readDeviceAuth(deviceCode);
+
+    const pairedClient = Array.isArray(deviceAuth?.clients)
+      ? deviceAuth.clients.find((client) => client.isPairedClient) || null
+      : null;
 
     if (!deviceAuth?.secretHash) {
       clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "not_paired");
+      return renderAccessState(res, deviceCode, "not_paired", { clientId });
     }
 
-    if (!hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)) {
+    if (!pairedClient) {
+      return renderAccessState(res, deviceCode, "not_paired", { clientId });
+    }
+
+    const hasValidSession = hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash);
+
+    if (!hasValidSession) {
+      await recordDeviceRejection(
+        deviceCode,
+        getRequestIp(req),
+        "auth_mismatch"
+      );
+      clearDeviceSessionCookie(req, res, deviceCode);
+      return renderAccessState(res, deviceCode, "auth_mismatch");
+    }
+
+    if (pairedClient.clientId !== clientId) {
       await recordDeviceRejection(
         deviceCode,
         getRequestIp(req),

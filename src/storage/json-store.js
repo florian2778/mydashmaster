@@ -15,6 +15,14 @@ const deviceAuthDir = path.join(dataRoot, "device-auth");
 const layoutsDir = path.join(dataRoot, "layouts");
 const DEVICE_CODE_LENGTH = 8;
 const DEVICE_CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+const ALLOWED_CLIENT_ACCESS_STATES = new Set([
+  "authorized",
+  "pending",
+  "auth_mismatch",
+  "revoked",
+  "not_paired"
+]);
+const CLIENT_RETENTION_MS = 48 * 60 * 60 * 1000;
 
 async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
@@ -82,6 +90,118 @@ function assertMatchingId(actualValue, expectedValue, fieldName, subject) {
   );
   error.name = "ValidationError";
   throw error;
+}
+
+function getPairedClient(deviceAuth) {
+  if (!Array.isArray(deviceAuth?.clients)) {
+    return null;
+  }
+
+  return deviceAuth.clients.find((client) => client.isPairedClient) || null;
+}
+
+function cleanupStaleClients(clients, now = Date.now()) {
+  if (!Array.isArray(clients)) {
+    return [];
+  }
+
+  return clients.filter((client) => {
+    if (
+      !client ||
+      typeof client !== "object" ||
+      typeof client.clientId !== "string" ||
+      client.clientId === ""
+    ) {
+      return false;
+    }
+
+    if (client.lastSeenAt === undefined) {
+      return true;
+    }
+
+    const lastSeenAt = new Date(client.lastSeenAt).getTime();
+
+    if (Number.isNaN(lastSeenAt)) {
+      return true;
+    }
+
+    return now - lastSeenAt <= CLIENT_RETENTION_MS;
+  });
+}
+
+function updateClientList(clients, updates) {
+  const nextClients = cleanupStaleClients(clients);
+  const existingClientIndex = nextClients.findIndex(
+    (client) => client.clientId === updates.clientId
+  );
+  const existingClient =
+    existingClientIndex >= 0
+      ? nextClients[existingClientIndex]
+      : {
+          clientId: updates.clientId,
+          isPairedClient: false
+        };
+  const nextClient = {
+    ...existingClient,
+    accessState: updates.accessState ?? existingClient.accessState,
+    clientId: updates.clientId,
+    isPairedClient:
+      updates.isPairedClient ?? Boolean(existingClient.isPairedClient)
+  };
+
+  if (
+    nextClient.accessState !== undefined &&
+    nextClient.accessState !== "authorized" &&
+    updates.isPairedClient === undefined
+  ) {
+    nextClient.isPairedClient = false;
+  }
+
+  if (updates.lastSeenAt !== undefined) {
+    nextClient.lastSeenAt = updates.lastSeenAt;
+  }
+
+  if (updates.lastAuthenticatedAt !== undefined) {
+    nextClient.lastAuthenticatedAt = updates.lastAuthenticatedAt;
+  }
+
+  if (updates.userAgent !== undefined) {
+    nextClient.userAgent = updates.userAgent;
+  }
+
+  if (updates.lastKnownIp !== undefined) {
+    nextClient.lastKnownIp = updates.lastKnownIp;
+  }
+
+  if (nextClient.userAgent === undefined) {
+    delete nextClient.userAgent;
+  }
+
+  if (nextClient.lastKnownIp === undefined) {
+    delete nextClient.lastKnownIp;
+  }
+
+  if (nextClient.lastSeenAt === undefined) {
+    delete nextClient.lastSeenAt;
+  }
+
+  if (nextClient.lastAuthenticatedAt === undefined) {
+    delete nextClient.lastAuthenticatedAt;
+  }
+
+  if (nextClient.isPairedClient) {
+    nextClients.forEach((client) => {
+      client.isPairedClient = false;
+    });
+  }
+
+  if (existingClientIndex >= 0) {
+    nextClients[existingClientIndex] = nextClient;
+  } else {
+    nextClients.push(nextClient);
+  }
+
+  return nextClients;
 }
 
 async function readDevice(deviceCode) {
@@ -393,26 +513,185 @@ async function activateCandidateSecret(deviceCode) {
     return null;
   }
 
+  const existingClients = cleanupStaleClients(deviceAuth.clients);
+  const pendingClients = existingClients.filter(
+    (client) => client.accessState === "pending"
+  );
+  const clients =
+    pendingClients.length === 1
+      ? existingClients.map((client) => ({
+          ...client,
+          accessState:
+            client.clientId === pendingClients[0].clientId
+              ? "authorized"
+              : "not_paired",
+          isPairedClient: client.clientId === pendingClients[0].clientId
+        }))
+      : existingClients.map((client) => ({
+          ...client,
+          accessState: "not_paired",
+          isPairedClient: false
+        }));
+
   return updateDeviceAuth(deviceCode, {
     candidateSecretHash: undefined,
+    clients,
     secretHash: deviceAuth.candidateSecretHash,
     updatedAt: new Date().toISOString()
   });
 }
 
 async function revokeDeviceAuth(deviceCode) {
+  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+
   return updateDeviceAuth(deviceCode, {
+    ...existingDeviceAuth,
     candidateSecretHash: undefined,
+    clients: cleanupStaleClients(existingDeviceAuth.clients).map((client) => ({
+      ...client,
+      isPairedClient: false
+    })),
     secretHash: undefined,
     updatedAt: new Date().toISOString()
   });
 }
 
 async function resetDevicePairing(deviceCode) {
+  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+
   return updateDeviceAuth(deviceCode, {
+    ...existingDeviceAuth,
     candidateSecretHash: undefined,
+    clients: cleanupStaleClients(existingDeviceAuth.clients).map((client) => {
+      const { lastAuthenticatedAt, ...clientWithoutAuthenticatedSession } = client;
+
+      return {
+        ...clientWithoutAuthenticatedSession,
+        accessState: "not_paired",
+        isPairedClient: false
+      };
+    }),
     secretHash: undefined,
     updatedAt: new Date().toISOString()
+  });
+}
+
+async function assignPairedActiveClient(deviceCode, clientId, userAgent) {
+  const now = new Date().toISOString();
+  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+
+  return updateDeviceAuth(deviceCode, {
+    ...existingDeviceAuth,
+    clients: updateClientList(existingDeviceAuth.clients, {
+      accessState: "authorized",
+      clientId,
+      isPairedClient: true,
+      userAgent
+    }),
+    updatedAt: now
+  });
+}
+
+async function pairDeviceToClient(deviceCode, clientId) {
+  const now = new Date().toISOString();
+  const existingDeviceAuth = await readDeviceAuth(deviceCode);
+
+  if (!existingDeviceAuth) {
+    return null;
+  }
+
+  if (!existingDeviceAuth.secretHash) {
+    const error = new Error(`Device ${deviceCode} has no active secretHash`);
+    error.name = "ValidationError";
+    throw error;
+  }
+
+  const clients = cleanupStaleClients(existingDeviceAuth.clients);
+  const selectedClient = clients.find((client) => client.clientId === clientId);
+
+  if (!selectedClient) {
+    const error = new Error(`Unknown clientId "${clientId}" for device ${deviceCode}`);
+    error.name = "ValidationError";
+    throw error;
+  }
+
+  if (!selectedClient.lastAuthenticatedAt) {
+    const error = new Error(
+      `Client "${clientId}" has not established an authenticated browser session`
+    );
+    error.name = "ValidationError";
+    throw error;
+  }
+
+  return updateDeviceAuth(deviceCode, {
+    ...existingDeviceAuth,
+    clients: clients.map((client) => ({
+      ...client,
+      accessState: client.clientId === clientId ? "authorized" : "not_paired",
+      isPairedClient: client.clientId === clientId
+    })),
+    updatedAt: now
+  });
+}
+
+async function recordDeviceClientActivity(
+  deviceCode,
+  clientId,
+  accessState,
+  userAgent,
+  lastKnownIp
+) {
+  if (!ALLOWED_CLIENT_ACCESS_STATES.has(accessState)) {
+    return readDeviceAuth(deviceCode);
+  }
+
+  const now = new Date().toISOString();
+  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+  const clients = updateClientList(existingDeviceAuth.clients, {
+    accessState,
+    clientId,
+    lastSeenAt: now,
+    lastKnownIp,
+    userAgent
+  });
+  const currentClient = clients.find((client) => client.clientId === clientId);
+  const nextDeviceAuth = {
+    ...existingDeviceAuth,
+    clients,
+    updatedAt: now
+  };
+
+  if (currentClient?.isPairedClient && accessState === "authorized") {
+    nextDeviceAuth.lastStatusAt = now;
+  }
+
+  return updateDeviceAuth(deviceCode, nextDeviceAuth);
+}
+
+async function recordAuthenticatedClientSession(
+  deviceCode,
+  clientId,
+  accessState,
+  userAgent,
+  lastKnownIp
+) {
+  if (!ALLOWED_CLIENT_ACCESS_STATES.has(accessState)) {
+    return readDeviceAuth(deviceCode);
+  }
+
+  const now = new Date().toISOString();
+  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+
+  return updateDeviceAuth(deviceCode, {
+    ...existingDeviceAuth,
+    clients: updateClientList(existingDeviceAuth.clients, {
+      accessState,
+      clientId,
+      lastAuthenticatedAt: now,
+      lastKnownIp,
+      userAgent
+    }),
+    updatedAt: now
   });
 }
 
@@ -447,6 +726,7 @@ async function listDevices() {
 
       return {
         ...device,
+        clients: cleanupStaleClients(deviceAuth?.clients),
         hasCandidateSecret: Boolean(deviceAuth?.candidateSecretHash),
         hasSecret: Boolean(deviceAuth?.secretHash),
         lastConnectedAt: deviceAuth?.lastConnectedAt || null,
@@ -454,6 +734,7 @@ async function listDevices() {
         lastRejectedAt: deviceAuth?.lastRejectedAt || null,
         lastRejectedIp: deviceAuth?.lastRejectedIp || null,
         lastRejectedReason: deviceAuth?.lastRejectedReason || null,
+        lastStatusAt: deviceAuth?.lastStatusAt || null,
         reloadVersion: deviceAuth?.reloadVersion || 0
       };
     })
@@ -506,6 +787,7 @@ async function listLayouts() {
 
 module.exports = {
   activateCandidateSecret,
+  assignPairedActiveClient,
   createAdminDevice,
   createPendingDevice,
   deleteDevice,
@@ -514,10 +796,13 @@ module.exports = {
   listDevices,
   listDeviceCodes,
   listLayouts,
+  pairDeviceToClient,
   readDeviceAuth,
   readLayoutRecord,
   readLayout,
   readDevice,
+  recordAuthenticatedClientSession,
+  recordDeviceClientActivity,
   recordDeviceActivity,
   recordDeviceRejection,
   requestDeviceReload,

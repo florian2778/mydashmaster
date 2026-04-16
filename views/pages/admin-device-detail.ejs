@@ -1,0 +1,165 @@
+<%- include("../partials/header") %>
+
+<section class="panel admin-device-detail-panel">
+  <header class="admin-layout-detail-header">
+    <div class="admin-layout-detail-heading">
+      <p class="admin-layouts-eyebrow">Device</p>
+      <div class="admin-layout-detail-titleline">
+        <h1><%= device.deviceCode %></h1>
+        <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
+          <%= device.status %>
+        </span>
+        <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
+      </div>
+      <% if (device.description) { %>
+        <p class="admin-layouts-subtitle"><%= device.description %></p>
+      <% } %>
+    </div>
+    <a class="admin-secondary-link" href="/admin/devices">Back to devices</a>
+  </header>
+
+  <% if (actionErrorMessage) { %>
+    <p class="admin-form-error"><%= actionErrorMessage %></p>
+  <% } %>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Summary</h2>
+    </div>
+    <div class="admin-device-detail-summary">
+      <span>Layout: <strong><%= device.layoutId || "none" %></strong></span>
+      <span>Status: <strong><%= device.status %></strong></span>
+      <span>Official Seen: <strong>Seen <%= device.displayLastSeen %></strong></span>
+      <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
+      <span>Last access: <strong><%= device.displayLastAccessDate %></strong></span>
+      <span>Last IP: <strong><%= device.displayLastIp %></strong></span>
+    </div>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Official Paired Client</h2>
+    </div>
+
+    <% if (officialPairedClient) { %>
+      <article class="admin-device-client-card admin-device-client-card--official">
+        <div class="device-overview-facts device-overview-facts--primary">
+          <span>State: <strong><%= officialPairedClient.pairedStateLabel %></strong></span>
+          <span>Access: <strong><%= officialPairedClient.accessState %></strong></span>
+          <span>Seen: <strong>Seen <%= officialPairedClient.displaySeen %></strong></span>
+          <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
+        </div>
+        <div class="device-overview-facts device-overview-facts--secondary">
+          <span>Client: <code title="<%= officialPairedClient.clientId %>"><%= officialPairedClient.displayClientId %></code></span>
+          <span>Last access: <%= officialPairedClient.displayLastConnectedAt %></span>
+          <span>Authenticated: <%= officialPairedClient.displayLastAuthenticatedAt %></span>
+          <span>IP: <%= officialPairedClient.displayLastKnownIp %></span>
+          <span>User-Agent: <%= officialPairedClient.userAgent || "-" %></span>
+        </div>
+      </article>
+    <% } else { %>
+      <p class="admin-layout-detail-empty">No paired client. Device is currently not paired.</p>
+    <% } %>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Additional Unpaired Client Activity</h2>
+    </div>
+
+    <% if (additionalClients.length === 0) { %>
+      <p class="admin-layout-detail-empty">No additional unpaired client activity.</p>
+    <% } else { %>
+      <div class="admin-device-client-list">
+        <% additionalClients.forEach((client) => { %>
+          <article class="admin-device-client-card">
+            <div class="device-overview-facts device-overview-facts--primary">
+              <span>Client: <code title="<%= client.clientId %>"><%= client.displayClientId %></code></span>
+              <span>Access: <strong><%= client.accessState %></strong></span>
+              <span>Last seen: <strong><%= client.displayLastSeenAt %></strong></span>
+            </div>
+            <div class="device-overview-facts device-overview-facts--secondary">
+              <span>Authenticated: <%= client.displayLastAuthenticatedAt %></span>
+              <span>IP: <%= client.displayLastKnownIp %></span>
+              <span>User-Agent: <%= client.userAgent || "-" %></span>
+            </div>
+            <% if (canPairClients && client.canBePaired) { %>
+              <form action="/admin/devices/<%= device.deviceCode %>/pair-client" method="post">
+                <input type="hidden" name="clientId" value="<%= client.clientId %>">
+                <button class="admin-action-button" type="submit">Pair this client</button>
+              </form>
+            <% } else if (canPairClients) { %>
+              <p class="device-diagnostic-note">Authenticate this browser first before pairing it.</p>
+            <% } %>
+          </article>
+        <% }) %>
+      </div>
+    <% } %>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Layout</h2>
+    </div>
+    <form class="admin-device-create admin-device-layout-panel admin-device-detail-layout-form" action="/admin/devices/<%= device.deviceCode %>/layout" method="post">
+      <input type="hidden" name="returnTo" value="detail">
+      <div>
+        <h3>Assigned Layout</h3>
+        <p class="admin-layouts-subtitle">
+          Current layout: <strong><%= device.layoutId || "none" %></strong>
+        </p>
+      </div>
+      <div class="admin-device-create-form">
+        <label>
+          <span>Layout</span>
+          <select name="layoutId">
+            <option value="" <%= !device.layoutId ? "selected" : "" %>>No layout assigned</option>
+            <% assignableLayouts.forEach((layout) => { %>
+              <option value="<%= layout.layoutId %>" <%= layout.layoutId === device.layoutId ? "selected" : "" %>>
+                <%= layout.layoutId %>
+              </option>
+            <% }) %>
+          </select>
+        </label>
+        <button class="admin-action-button" type="submit">Save layout</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Actions</h2>
+    </div>
+    <div class="admin-device-detail-actions">
+      <% if (device.canApprove) { %>
+        <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
+          <input type="hidden" name="returnTo" value="detail">
+          <button class="admin-action-button" type="submit">Approve</button>
+        </form>
+      <% } %>
+      <% if (device.canResetPairing) { %>
+        <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
+          <input type="hidden" name="returnTo" value="detail">
+          <button class="admin-action-button admin-action-button--secondary" type="submit">Reset pairing</button>
+        </form>
+      <% } %>
+      <% if (device.canReload) { %>
+        <form action="/admin/devices/<%= device.deviceCode %>/reload" method="post">
+          <input type="hidden" name="returnTo" value="detail">
+          <button class="admin-action-button admin-action-button--secondary" type="submit">Reload</button>
+        </form>
+      <% } %>
+      <% if (device.canRevoke) { %>
+        <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
+          <input type="hidden" name="returnTo" value="detail">
+          <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
+        </form>
+      <% } %>
+      <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
+        <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
+      </form>
+    </div>
+  </section>
+</section>
+
+<%- include("../partials/footer") %>

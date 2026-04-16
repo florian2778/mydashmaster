@@ -10,6 +10,10 @@
     <main class="pending-wrap">
       <p>Device</p>
       <p><code><%= deviceCode %></code></p>
+      <% if (accessState === "not_paired" && clientId) { %>
+        <p>Client ID</p>
+        <p><code><%= clientId %></code></p>
+      <% } %>
       <p><%= message %></p>
       <% if (note) { %>
         <p class="pending-note"><%= note %></p>
@@ -77,7 +81,7 @@
                 const deviceSecret = getDeviceSecret();
                 const authPayload = await requestBootstrap(deviceSecret);
 
-                if (authPayload.status === "approved") {
+                if (authPayload.status === "approved" && currentAccessState === "pending") {
                   window.location.reload();
                   return;
                 }

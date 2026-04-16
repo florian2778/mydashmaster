@@ -40,51 +40,54 @@
     <section class="device-overview-list">
       <% devices.forEach((device) => { %>
         <article class="device-overview-card">
-          <div class="device-overview-meta">
-            <div class="layout-overview-topline">
-              <h2><%= device.deviceCode %></h2>
-              <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
-                <%= device.status %>
-              </span>
-              <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
-            </div>
+          <a class="device-overview-link" href="<%= device.detailUrl %>">
+            <div class="device-overview-meta">
+              <div class="layout-overview-topline">
+                <h2><%= device.deviceCode %></h2>
+                <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
+                  <%= device.status %>
+                </span>
+                <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
+              </div>
 
-            <div class="device-overview-facts device-overview-facts--primary">
-              <span>Layout: <%= device.layoutId || "none" %></span>
-              <span>
-                Link:
-                <a href="/d/<%= device.deviceCode %>"><code>/d/<%= device.deviceCode %></code></a>
-              </span>
-              <span>
-                <a class="admin-inline-link" href="/admin/devices/<%= device.deviceCode %>/layout">Change layout</a>
-              </span>
-            </div>
+              <div class="device-overview-facts device-overview-facts--primary">
+                <span>Layout: <%= device.layoutId || "none" %></span>
+                <span>
+                  Link:
+                  <span><code>/d/<%= device.deviceCode %></code></span>
+                </span>
+                <span>
+                  <span class="admin-inline-link">Open device detail</span>
+                </span>
+              </div>
 
-            <div class="device-overview-facts device-overview-facts--secondary">
-              <span>Last access: <%= device.displayLastAccessDate %></span>
-              <span>IP: <%= device.displayLastIp %></span>
-              <span>Seen: <%= device.displayLastSeen %></span>
-              <% if (device.hasCandidateSecret) { %>
-                <span class="layout-edge-indicator">candidate secret</span>
+              <div class="device-overview-facts device-overview-facts--secondary">
+                <span>Last access: <%= device.displayLastAccessDate %></span>
+                <span>IP: <%= device.displayLastIp %></span>
+                <span>Seen: <%= device.displayLastSeen %></span>
+                <% if (device.hasCandidateSecret) { %>
+                  <span class="layout-edge-indicator">candidate secret</span>
+                <% } %>
+              </div>
+
+              <% if (device.lastRejectedAt || device.lastRejectedIp || device.lastRejectedReason) { %>
+                <p class="device-diagnostic-note">
+                  Last rejected:
+                  <%= device.displayLastRejectedDate %>
+                  <% if (device.lastRejectedIp || device.displayRejectedIp !== "-") { %>
+                    · IP <%= device.displayRejectedIp %>
+                  <% } %>
+                  <% if (device.lastRejectedReason) { %>
+                    · <%= device.lastRejectedReason %>
+                  <% } %>
+                </p>
               <% } %>
             </div>
-
-            <% if (device.lastRejectedAt || device.lastRejectedIp || device.lastRejectedReason) { %>
-              <p class="device-diagnostic-note">
-                Last rejected:
-                <%= device.displayLastRejectedDate %>
-                <% if (device.lastRejectedIp || device.displayRejectedIp !== "-") { %>
-                  · IP <%= device.displayRejectedIp %>
-                <% } %>
-                <% if (device.lastRejectedReason) { %>
-                  · <%= device.lastRejectedReason %>
-                <% } %>
-              </p>
-            <% } %>
-          </div>
+          </a>
 
           <div class="device-overview-actions">
             <div class="device-overview-actions-main">
+              <a class="admin-action-button admin-action-button--secondary" href="<%= device.detailUrl %>">Details</a>
               <% if (device.canApprove) { %>
                 <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
                   <button class="admin-action-button" type="submit">Approve</button>

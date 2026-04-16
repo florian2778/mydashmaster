@@ -8,6 +8,7 @@ const { hashAdminPassword } = require("../src/auth/admin-auth");
 const { hashDeviceSecret } = require("../src/auth/device-auth");
 const {
   listDeviceCodes,
+  pairDeviceToClient,
   readDevice,
   readDeviceAuth,
   updateDeviceAuth,
@@ -78,6 +79,45 @@ async function withAdminEnv(run) {
   }
 }
 
+function getSetCookieValues(response) {
+  if (typeof response.headers.getSetCookie === "function") {
+    return response.headers.getSetCookie();
+  }
+
+  const headerValue = response.headers.get("set-cookie");
+
+  if (!headerValue) {
+    return [];
+  }
+
+  return headerValue.split(/,(?=[^;,\s]+=[^;]+)/);
+}
+
+function getCookiePair(response, cookieName) {
+  for (const cookieHeader of getSetCookieValues(response)) {
+    const match = cookieHeader.match(
+      new RegExp(`${cookieName}=([^;]+)`)
+    );
+
+    if (match) {
+      return `${cookieName}=${match[1]}`;
+    }
+  }
+
+  return null;
+}
+
+function getCookieHeader(response, cookieNames) {
+  return cookieNames
+    .map((cookieName) => getCookiePair(response, cookieName))
+    .filter(Boolean)
+    .join("; ");
+}
+
+function getCookieValue(cookiePair) {
+  return cookiePair.split("=")[1];
+}
+
 async function loginAsAdmin(baseUrl) {
   const response = await fetch(`${baseUrl}/admin/login`, {
     body: new URLSearchParams({
@@ -93,11 +133,11 @@ async function loginAsAdmin(baseUrl) {
 
   assert.equal(response.status, 302);
 
-  const cookieHeader = response.headers.get("set-cookie");
+  const cookieHeader = getCookiePair(response, "mydashmaster_admin");
 
   assert.match(cookieHeader, /mydashmaster_admin=/);
 
-  return cookieHeader.split(";")[0];
+  return cookieHeader;
 }
 
 test("unknown device page does not create a device record", async () => {
@@ -169,12 +209,18 @@ test("approved device without secretHash shows not paired state", async () => {
     await withServer(async (baseUrl) => {
       const response = await fetch(`${baseUrl}/d/${deviceCode}`);
       const body = await response.text();
+      const clientId = getCookieValue(
+        getCookiePair(response, "mydashmaster_device_client")
+      );
 
       assert.equal(response.status, 200);
       assert.match(body, /Device not paired/);
+      assert.match(body, /Client ID/);
+      assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/notpair1\/auth/);
       assert.match(body, /\/api\/device\/notpair1\/status/);
       assert.match(body, /const currentAccessState = "not_paired"/);
+      assert.match(body, /if \(true\)/);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -182,7 +228,7 @@ test("approved device without secretHash shows not paired state", async () => {
   }
 });
 
-test("approved device with invalid session shows auth mismatch and records diagnostics", async () => {
+test("approved device without paired client stays not_paired even without a valid session", async () => {
   const deviceCode = "mismatch";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -208,20 +254,24 @@ test("approved device with invalid session shows auth mismatch and records diagn
         }
       });
       const body = await response.text();
+      const clientId = getCookieValue(
+        getCookiePair(response, "mydashmaster_device_client")
+      );
 
       assert.equal(response.status, 200);
-      assert.match(body, /Access not available in this browser/);
-      assert.match(body, /already linked to another browser session/);
+      assert.match(body, /Device not paired/);
+      assert.match(body, /Client ID/);
+      assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/mismatch\/status/);
-      assert.match(body, /const currentAccessState = "auth_mismatch"/);
-      assert.match(body, /if \(false\)/);
+      assert.match(body, /const currentAccessState = "not_paired"/);
+      assert.match(body, /if \(true\)/);
     });
 
     const deviceAuth = await readDeviceAuth(deviceCode);
 
-    assert.equal(deviceAuth.lastRejectedIp, "203.0.113.44");
-    assert.equal(deviceAuth.lastRejectedReason, "auth_mismatch");
-    assert.match(deviceAuth.lastRejectedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(deviceAuth.lastRejectedIp, undefined);
+    assert.equal(deviceAuth.lastRejectedReason, undefined);
+    assert.equal(deviceAuth.lastRejectedAt, undefined);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -258,7 +308,7 @@ test("revoked device shows distinct revoked state", async () => {
   }
 });
 
-test("admin reset pairing clears trusted pairing but keeps device approved", async () => {
+test("admin reset pairing clears official client assignment and active secret while keeping device approved", async () => {
   const deviceCode = "resetpair";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -273,7 +323,24 @@ test("admin reset pairing clears trusted pairing but keeps device approved", asy
     });
     await updateDeviceAuth(deviceCode, {
       candidateSecretHash: "b".repeat(64),
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "paired-client",
+          isPairedClient: true,
+          lastSeenAt: "2026-04-12T00:00:00.000Z",
+          userAgent: "Client/1.0"
+        },
+        {
+          accessState: "auth_mismatch",
+          clientId: "other-client",
+          isPairedClient: false,
+          lastSeenAt: "2026-04-12T00:00:00.000Z",
+          userAgent: "Other/1.0"
+        }
+      ],
       deviceCode,
+      lastStatusAt: "2026-04-12T00:00:00.000Z",
       secretHash: hashDeviceSecret("secret-alpha"),
       updatedAt: "2026-04-12T00:00:00.000Z"
     });
@@ -302,13 +369,21 @@ test("admin reset pairing clears trusted pairing but keeps device approved", asy
     assert.equal(device.status, "approved");
     assert.equal(deviceAuth.secretHash, undefined);
     assert.equal(deviceAuth.candidateSecretHash, undefined);
+    assert.equal(
+      deviceAuth.clients.every((client) => client.isPairedClient === false),
+      true
+    );
+    assert.equal(
+      deviceAuth.clients.every((client) => client.accessState === "not_paired"),
+      true
+    );
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
   }
 });
 
-test("approved not paired device can re-pair and become authorized again", async () => {
+test("approved not paired device can authenticate without auto-pairing", async () => {
   const deviceCode = "repair01";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -331,17 +406,40 @@ test("approved not paired device can re-pair and become authorized again", async
         method: "POST"
       });
       const payload = await response.json();
-      const cookieHeader = response.headers.get("set-cookie");
+      const cookieHeader = getCookieHeader(response, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      const clientId = getCookieValue(
+        getCookiePair(response, "mydashmaster_device_client")
+      );
 
       assert.equal(response.status, 200);
       assert.deepEqual(payload, { status: "approved" });
       assert.match(cookieHeader, /mydashmaster_device=/);
+
+      const statusResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: cookieHeader
+        }
+      });
+
+      assert.deepEqual(await statusResponse.json(), {
+        accessState: "not_paired",
+        authorized: false,
+        deviceCode,
+        layoutId: null,
+        reloadVersion: 0,
+        status: "approved"
+      });
+
+      const deviceAuth = await readDeviceAuth(deviceCode);
+      const client = deviceAuth.clients.find((entry) => entry.clientId === clientId);
+
+      assert.equal(client.isPairedClient, false);
+      assert.equal(client.accessState, "not_paired");
+      assert.match(client.lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
     });
-
-    const deviceAuth = await readDeviceAuth(deviceCode);
-
-    assert.equal(deviceAuth.candidateSecretHash, undefined);
-    assert.equal(deviceAuth.secretHash, hashDeviceSecret("secret-repair"));
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -369,8 +467,9 @@ test("admin device cards show formatted fields and filtered actions", async () =
       lastRejectedAt: "2026-04-12T12:00:00.000Z",
       lastRejectedIp: "203.0.113.44",
       lastRejectedReason: "auth_mismatch",
+      lastStatusAt: new Date().toISOString(),
       secretHash: hashDeviceSecret("secret-alpha"),
-      updatedAt: "2026-04-13T00:00:00.000Z"
+      updatedAt: new Date().toISOString()
     });
 
     await withAdminEnv(async () => {
@@ -386,14 +485,272 @@ test("admin device cards show formatted fields and filtered actions", async () =
         assert.equal(response.status, 200);
         assert.match(body, /Last access: 13\.04\.2026/);
         assert.match(body, /IP: 203\.0\.113\.99/);
-        assert.match(body, /Seen: \d+s/);
+        assert.match(body, /Seen: (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
         assert.match(body, /Last rejected:\s*12\.04\.2026[\s\S]*IP 203\.0\.113\.44[\s\S]*auth_mismatch/);
+        assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
         assert.match(body, /Reload/);
         assert.match(body, /Reset pairing/);
         assert.match(body, /Revoke/);
         assert.match(body, /Delete/);
       });
     });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("admin device detail page shows summary, official paired client, and additional client activity", async () => {
+  const deviceCode = "detail01";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date();
+  const lastConnectedAt = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
+  const pairedSeenAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  const additionalSeenAt = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+  const lastStatusAt = new Date(now.getTime() - 2 * 60 * 1000).toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      description: "North lobby panel",
+      deviceCode,
+      layoutId: "layout-2",
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "client-alpha-1234",
+          isPairedClient: true,
+          lastAuthenticatedAt: pairedSeenAt,
+          lastKnownIp: "203.0.113.7",
+          lastSeenAt: pairedSeenAt,
+          userAgent: "PairedClient/1.0"
+        },
+        {
+          accessState: "auth_mismatch",
+          clientId: "client-bravo-5678",
+          isPairedClient: false,
+          lastAuthenticatedAt: additionalSeenAt,
+          lastKnownIp: "203.0.113.8",
+          lastSeenAt: additionalSeenAt,
+          userAgent: "SpareBrowser/2.0"
+        }
+      ],
+      deviceCode,
+      lastConnectedAt,
+      lastKnownIp: "203.0.113.7",
+      lastStatusAt,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: lastStatusAt
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(`${baseUrl}/admin/devices/${deviceCode}`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /North lobby panel/);
+        assert.match(body, /Summary/);
+        assert.match(body, /Layout: <strong>layout-2<\/strong>/);
+        assert.match(body, /Official Paired Client/);
+        assert.match(body, /paired active client/);
+        assert.match(body, /Access: <strong>authorized<\/strong>/);
+        assert.match(body, /Seen: <strong>Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)<\/strong>/);
+        assert.match(body, new RegExp(`Seen at: <strong>${lastStatusAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/strong>`));
+        assert.match(body, new RegExp(`Last access: ${lastConnectedAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(body, /PairedClient\/1\.0/);
+        assert.match(body, /203\.0\.113\.7/);
+        assert.match(body, /Additional Unpaired Client Activity/);
+        assert.match(body, /client-b\.\.\./);
+        assert.match(body, /auth_mismatch/);
+        assert.match(body, new RegExp(additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+        assert.match(body, /SpareBrowser\/2\.0/);
+        assert.match(body, new RegExp(`Authenticated: ${additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(body, /name="clientId" value="client-bravo-5678"/);
+        assert.doesNotMatch(body, /name="clientId" value="client-alpha-1234"/);
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("admin device detail page shows no paired client empty state after reset", async () => {
+  const deviceCode = "detail02";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      layoutId: "layout-1",
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "client-a",
+          isPairedClient: true,
+          lastSeenAt: "2026-04-13T10:00:00.000Z",
+          userAgent: "BrowserA/1.0"
+        },
+        {
+          accessState: "auth_mismatch",
+          clientId: "client-b",
+          isPairedClient: false,
+          lastSeenAt: "2026-04-13T10:05:00.000Z",
+          userAgent: "BrowserB/1.0"
+        }
+      ],
+      deviceCode,
+      lastStatusAt: "2026-04-13T10:10:00.000Z",
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: "2026-04-13T10:10:00.000Z"
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const resetResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/reset-pairing`,
+          {
+            body: new URLSearchParams({
+              returnTo: "detail"
+            }),
+            headers: {
+              Cookie: adminCookie,
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(resetResponse.status, 302);
+        assert.equal(
+          resetResponse.headers.get("location"),
+          `/admin/devices/${deviceCode}`
+        );
+
+        const detailResponse = await fetch(`${baseUrl}/admin/devices/${deviceCode}`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const detailBody = await detailResponse.text();
+
+        assert.equal(detailResponse.status, 200);
+        assert.match(detailBody, /No paired client\. Device is currently not paired\./);
+        assert.doesNotMatch(detailBody, /Access: <strong>authorized<\/strong>/);
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("admin device detail pair action selects the requested client and updates the detail view", async () => {
+  const deviceCode = "detail03";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "client-a",
+          isPairedClient: true,
+          lastSeenAt: now,
+          userAgent: "BrowserA/1.0"
+        },
+        {
+          accessState: "not_paired",
+          clientId: "client-b",
+          isPairedClient: false,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          userAgent: "BrowserB/1.0"
+        }
+      ],
+      deviceCode,
+      lastStatusAt: now,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: now
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const pairResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+          {
+            body: new URLSearchParams({
+              clientId: "client-b"
+            }),
+            headers: {
+              Cookie: adminCookie,
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(pairResponse.status, 302);
+        assert.equal(pairResponse.headers.get("location"), `/admin/devices/${deviceCode}`);
+
+        const detailResponse = await fetch(`${baseUrl}/admin/devices/${deviceCode}`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const body = await detailResponse.text();
+
+        assert.equal(detailResponse.status, 200);
+        assert.match(body, /Official Paired Client/);
+        assert.match(body, /BrowserB\/1\.0/);
+        assert.match(body, /Access: <strong>authorized<\/strong>/);
+        assert.match(body, /Authenticate this browser first before pairing it\./);
+        assert.doesNotMatch(body, /name="clientId" value="client-b"/);
+      });
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
+    const clientA = deviceAuth.clients.find((client) => client.clientId === "client-a");
+    const clientB = deviceAuth.clients.find((client) => client.clientId === "client-b");
+
+    assert.equal(pairedClients.length, 1);
+    assert.equal(clientB.isPairedClient, true);
+    assert.equal(clientB.accessState, "authorized");
+    assert.equal(clientA.isPairedClient, false);
+    assert.equal(clientA.accessState, "not_paired");
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -630,7 +987,7 @@ test("device status endpoint reports authorization and layout for approved devic
       );
 
       assert.deepEqual(await unauthorizedResponse.json(), {
-        accessState: "auth_mismatch",
+        accessState: "not_paired",
         authorized: false,
         deviceCode,
         layoutId: "layout-2",
@@ -645,7 +1002,10 @@ test("device status endpoint reports authorization and layout for approved devic
         },
         method: "POST"
       });
-      const cookieHeader = authResponse.headers.get("set-cookie");
+      const cookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
 
       assert.equal(authResponse.status, 200);
       assert.match(cookieHeader, /mydashmaster_device=/);
@@ -654,18 +1014,935 @@ test("device status endpoint reports authorization and layout for approved devic
         `${baseUrl}/api/device/${deviceCode}/status`,
         {
           headers: {
-            Cookie: cookieHeader.split(";")[0]
+            Cookie: cookieHeader
           }
         }
       );
 
       assert.deepEqual(await authorizedResponse.json(), {
-        accessState: "authorized",
-        authorized: true,
+        accessState: "not_paired",
+        authorized: false,
         deviceCode,
         layoutId: "layout-2",
         reloadVersion: 0,
         status: "approved"
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("paired active client status polling updates official heartbeat and client activity", async () => {
+  const deviceCode = "heartbt1";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const authResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-heartbeat" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "HeartbeatClient/1.0"
+        },
+        method: "POST"
+      });
+      const authCookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      const clientId = getCookieValue(
+        getCookiePair(authResponse, "mydashmaster_device_client")
+      );
+
+      assert.equal(authResponse.status, 200);
+
+      await pairDeviceToClient(deviceCode, clientId);
+
+      const statusResponse = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            Cookie: authCookieHeader,
+            "User-Agent": "HeartbeatClient/1.0"
+          }
+        }
+      );
+
+      assert.equal(statusResponse.status, 200);
+      assert.equal((await statusResponse.json()).accessState, "authorized");
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
+
+    assert.equal(pairedClients.length, 1);
+    assert.equal(pairedClients[0].accessState, "authorized");
+    assert.equal(pairedClients[0].userAgent, "HeartbeatClient/1.0");
+    assert.match(pairedClients[0].lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(deviceAuth.lastStatusAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("additional unpaired client activity updates only its own client lastSeenAt", async () => {
+  const deviceCode = "heartbt2";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const authResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-heartbeat" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "PairedClient/1.0"
+        },
+        method: "POST"
+      });
+      const pairedCookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      const pairedClientId = getCookieValue(
+        getCookiePair(authResponse, "mydashmaster_device_client")
+      );
+
+      await pairDeviceToClient(deviceCode, pairedClientId);
+
+      await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: pairedCookieHeader,
+          "User-Agent": "PairedClient/1.0"
+        }
+      });
+
+      const beforeMismatch = await readDeviceAuth(deviceCode);
+      const officialHeartbeat = beforeMismatch.lastStatusAt;
+
+      const mismatchResponse = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            "User-Agent": "OtherClient/1.0"
+          }
+        }
+      );
+      const mismatchPayload = await mismatchResponse.json();
+
+      assert.equal(mismatchPayload.accessState, "auth_mismatch");
+
+      const afterMismatch = await readDeviceAuth(deviceCode);
+      const pairedClients = afterMismatch.clients.filter((client) => client.isPairedClient);
+      const mismatchClient = afterMismatch.clients.find(
+        (client) => client.userAgent === "OtherClient/1.0"
+      );
+
+      assert.equal(afterMismatch.lastStatusAt, officialHeartbeat);
+      assert.equal(pairedClients.length, 1);
+      assert.equal(pairedClients[0].userAgent, "PairedClient/1.0");
+      assert.equal(mismatchClient.accessState, "auth_mismatch");
+      assert.equal(mismatchClient.isPairedClient, false);
+      assert.match(mismatchClient.lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("client activity stores lastKnownIp per client on status polling", async () => {
+  const deviceCode = "heartbt7";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "pending"
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          "X-Forwarded-For": "203.0.113.77"
+        }
+      });
+
+      assert.equal(response.status, 200);
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+
+    assert.equal(deviceAuth.clients.length, 1);
+    assert.equal(deviceAuth.clients[0].accessState, "pending");
+    assert.equal(deviceAuth.clients[0].lastKnownIp, "203.0.113.77");
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("subsequent auth does not replace the paired client without explicit selection", async () => {
+  const deviceCode = "heartbt3";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const firstAuthResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-exclusive" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "ClientOne/1.0"
+        },
+        method: "POST"
+      });
+
+      assert.equal(firstAuthResponse.status, 200);
+      await pairDeviceToClient(
+        deviceCode,
+        getCookieValue(getCookiePair(firstAuthResponse, "mydashmaster_device_client"))
+      );
+
+      const secondAuthResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-exclusive" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "ClientTwo/1.0"
+        },
+        method: "POST"
+      });
+
+      assert.equal(secondAuthResponse.status, 200);
+
+      const secondCookieHeader = getCookieHeader(secondAuthResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      const secondStatusResponse = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            Cookie: secondCookieHeader,
+            "User-Agent": "ClientTwo/1.0"
+          }
+        }
+      );
+
+      assert.equal((await secondStatusResponse.json()).accessState, "auth_mismatch");
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
+    const firstClient = deviceAuth.clients.find((client) => client.userAgent === "ClientOne/1.0");
+    const secondClient = deviceAuth.clients.find((client) => client.userAgent === "ClientTwo/1.0");
+
+    assert.equal(pairedClients.length, 1);
+    assert.equal(firstClient.isPairedClient, true);
+    assert.equal(secondClient.isPairedClient, false);
+    assert.equal(secondClient.accessState, "auth_mismatch");
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("device clientId cookie is created when missing and reused when present", async () => {
+  const deviceCode = "heartbt4";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "pending"
+    });
+
+    await withServer(async (baseUrl) => {
+      const firstResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/status`);
+      const clientCookiePair = getCookiePair(firstResponse, "mydashmaster_device_client");
+
+      assert.equal(firstResponse.status, 200);
+      assert.match(clientCookiePair, /mydashmaster_device_client=/);
+
+      const secondResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: clientCookiePair
+        }
+      });
+
+      assert.equal(secondResponse.status, 200);
+      assert.equal(
+        getCookiePair(secondResponse, "mydashmaster_device_client"),
+        null
+      );
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("status polling after reset updates client activity but not official heartbeat", async () => {
+  const deviceCode = "afterrst";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const oldHeartbeat = "2026-04-12T00:00:00.000Z";
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "not_paired",
+          clientId: "reset-client",
+          isPairedClient: false,
+          lastSeenAt: oldHeartbeat,
+          userAgent: "ResetClient/1.0"
+        }
+      ],
+      deviceCode,
+      lastStatusAt: oldHeartbeat,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: oldHeartbeat
+    });
+
+    await withServer(async (baseUrl) => {
+      const authResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "ResetClient/1.0"
+        },
+        method: "POST"
+      });
+      const cookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+
+      const statusResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: cookieHeader,
+          "User-Agent": "ResetClient/1.0"
+        }
+      });
+      const payload = await statusResponse.json();
+
+      assert.equal(payload.accessState, "not_paired");
+      assert.equal(payload.authorized, false);
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+
+    assert.equal(deviceAuth.lastStatusAt, oldHeartbeat);
+    assert.equal(deviceAuth.clients[0].accessState, "not_paired");
+    assert.match(deviceAuth.clients[0].lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("fresh browser after reset can authenticate, stays not paired, and becomes official only after admin pairing", async () => {
+  const deviceCode = "resetflow";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const browserOneAuth = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "OriginalBrowser/1.0"
+        },
+        method: "POST"
+      });
+      const browserOneCookies = getCookieHeader(browserOneAuth, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+
+      await withAdminEnv(async () => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const resetResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/reset-pairing`,
+          {
+            headers: {
+              Cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(resetResponse.status, 302);
+      });
+
+      const browserTwoPage = await fetch(`${baseUrl}/d/${deviceCode}`, {
+        headers: {
+          "User-Agent": "FreshBrowser/2.0"
+        }
+      });
+      const browserTwoPageBody = await browserTwoPage.text();
+      const browserTwoClientCookie = getCookiePair(
+        browserTwoPage,
+        "mydashmaster_device_client"
+      );
+      const browserTwoClientId = getCookieValue(browserTwoClientCookie);
+
+      assert.equal(browserTwoPage.status, 200);
+      assert.match(browserTwoPageBody, /Device not paired/);
+      assert.match(browserTwoPageBody, /Client ID/);
+      assert.match(browserTwoPageBody, new RegExp(browserTwoClientId));
+      assert.match(browserTwoPageBody, /if \(true\)/);
+      assert.match(browserTwoClientCookie, /mydashmaster_device_client=/);
+
+      const browserTwoAuth = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          Cookie: browserTwoClientCookie,
+          "Content-Type": "application/json",
+          "User-Agent": "FreshBrowser/2.0"
+        },
+        method: "POST"
+      });
+      const browserTwoAuthPayload = await browserTwoAuth.json();
+      const browserTwoDeviceCookie = getCookiePair(browserTwoAuth, "mydashmaster_device");
+      const browserTwoCookies = [browserTwoClientCookie, browserTwoDeviceCookie]
+        .filter(Boolean)
+        .join("; ");
+
+      assert.equal(browserTwoAuth.status, 200);
+      assert.deepEqual(browserTwoAuthPayload, { status: "approved" });
+      assert.match(browserTwoCookies, /mydashmaster_device=/);
+
+      const deviceAuthAfterAuth = await readDeviceAuth(deviceCode);
+      const browserTwoClientAfterAuth = deviceAuthAfterAuth.clients.find(
+        (client) => client.clientId === browserTwoClientId
+      );
+
+      assert.equal(browserTwoClientAfterAuth.isPairedClient, false);
+      assert.equal(browserTwoClientAfterAuth.accessState, "not_paired");
+      assert.match(browserTwoClientAfterAuth.lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+      const browserTwoStatusBeforePair = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            Cookie: browserTwoCookies,
+            "User-Agent": "FreshBrowser/2.0"
+          }
+        }
+      );
+      const browserTwoStatusBeforePairPayload = await browserTwoStatusBeforePair.json();
+
+      assert.equal(browserTwoStatusBeforePairPayload.accessState, "not_paired");
+      assert.equal(browserTwoStatusBeforePairPayload.authorized, false);
+
+      const heartbeatBeforePair = (await readDeviceAuth(deviceCode)).lastStatusAt || null;
+
+      await withAdminEnv(async () => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const pairResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+          {
+            body: new URLSearchParams({
+              clientId: browserTwoClientId
+            }),
+            headers: {
+              Cookie: adminCookie,
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(pairResponse.status, 302);
+      });
+
+      const browserTwoStatusAfterPair = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            Cookie: browserTwoCookies,
+            "User-Agent": "FreshBrowser/2.0"
+          }
+        }
+      );
+      const browserTwoStatusAfterPairPayload = await browserTwoStatusAfterPair.json();
+
+      assert.equal(browserTwoStatusAfterPairPayload.accessState, "authorized");
+      assert.equal(browserTwoStatusAfterPairPayload.authorized, true);
+
+      const browserOneStatusAfterPair = await fetch(
+        `${baseUrl}/api/device/${deviceCode}/status`,
+        {
+          headers: {
+            Cookie: browserOneCookies,
+            "User-Agent": "OriginalBrowser/1.0"
+          }
+        }
+      );
+      const browserOneStatusAfterPairPayload = await browserOneStatusAfterPair.json();
+
+      assert.equal(browserOneStatusAfterPairPayload.accessState, "auth_mismatch");
+      assert.equal(browserOneStatusAfterPairPayload.authorized, false);
+
+      const deviceAuthAfterPair = await readDeviceAuth(deviceCode);
+      const pairedClient = deviceAuthAfterPair.clients.find((client) => client.isPairedClient);
+
+      assert.equal(pairedClient.clientId, browserTwoClientId);
+      assert.notEqual(deviceAuthAfterPair.lastStatusAt, heartbeatBeforePair);
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("reset clears stale authenticated session evidence so an old browser cannot be paired without reauth", async () => {
+  const deviceCode = "stalepair";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const browserOneAuth = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "OriginalBrowser/1.0"
+        },
+        method: "POST"
+      });
+      const browserOneClientId = getCookieValue(
+        getCookiePair(browserOneAuth, "mydashmaster_device_client")
+      );
+
+      await withAdminEnv(async () => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const resetResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/reset-pairing`,
+          {
+            headers: {
+              Cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(resetResponse.status, 302);
+      });
+
+      const afterReset = await readDeviceAuth(deviceCode);
+      const browserOneAfterReset = afterReset.clients.find(
+        (client) => client.clientId === browserOneClientId
+      );
+
+      assert.equal(browserOneAfterReset.lastAuthenticatedAt, undefined);
+
+      const browserTwoPage = await fetch(`${baseUrl}/d/${deviceCode}`, {
+        headers: {
+          "User-Agent": "SecondBrowser/2.0"
+        }
+      });
+      const browserTwoClientCookie = getCookiePair(
+        browserTwoPage,
+        "mydashmaster_device_client"
+      );
+
+      const browserTwoAuth = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-beta" }),
+        headers: {
+          Cookie: browserTwoClientCookie,
+          "Content-Type": "application/json",
+          "User-Agent": "SecondBrowser/2.0"
+        },
+        method: "POST"
+      });
+
+      assert.equal(browserTwoAuth.status, 200);
+
+      await withAdminEnv(async () => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const pairResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+          {
+            body: new URLSearchParams({
+              clientId: browserOneClientId
+            }),
+            headers: {
+              Cookie: adminCookie,
+              "Content-Type": "application/x-www-form-urlencoded"
+            },
+            method: "POST"
+          }
+        );
+        const pairBody = await pairResponse.text();
+
+        assert.equal(pairResponse.status, 400);
+        assert.match(pairBody, /has not established an authenticated browser session/);
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("former paired client polling after reset clears stale paired flag without advancing heartbeat", async () => {
+  const deviceCode = "resetstl";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const oldHeartbeat = new Date(Date.now() - 60 * 1000).toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const firstAuthResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "OriginalBrowser/1.0"
+        },
+        method: "POST"
+      });
+
+      const firstCookieHeader = getCookieHeader(firstAuthResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      const firstClientId = getCookieValue(
+        getCookiePair(firstAuthResponse, "mydashmaster_device_client")
+      );
+
+      await updateDeviceAuth(deviceCode, {
+        ...(await readDeviceAuth(deviceCode)),
+        lastStatusAt: oldHeartbeat,
+        updatedAt: oldHeartbeat
+      });
+
+      await withAdminEnv(async () => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const resetResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/reset-pairing`,
+          {
+            headers: {
+              Cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(resetResponse.status, 302);
+      });
+
+      const statusResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: firstCookieHeader,
+          "User-Agent": "OriginalBrowser/1.0"
+        }
+      });
+      const statusPayload = await statusResponse.json();
+
+      assert.equal(statusPayload.accessState, "not_paired");
+      assert.equal(statusPayload.authorized, false);
+
+      const deviceAuth = await readDeviceAuth(deviceCode);
+      const originalClient = deviceAuth.clients.find((client) => client.clientId === firstClientId);
+
+      assert.equal(deviceAuth.lastStatusAt, oldHeartbeat);
+      assert.equal(originalClient.isPairedClient, false);
+      assert.equal(originalClient.accessState, "not_paired");
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("pairDeviceToClient selects exactly one official client", async () => {
+  const deviceCode = "pairclnt";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "not_paired",
+          clientId: "client-a",
+          isPairedClient: false,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          userAgent: "ClientA/1.0"
+        },
+        {
+          accessState: "not_paired",
+          clientId: "client-b",
+          isPairedClient: false,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          userAgent: "ClientB/1.0"
+        }
+      ],
+      deviceCode,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: now
+    });
+
+    await pairDeviceToClient(deviceCode, "client-b");
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
+    const clientA = deviceAuth.clients.find((client) => client.clientId === "client-a");
+    const clientB = deviceAuth.clients.find((client) => client.clientId === "client-b");
+
+    assert.equal(pairedClients.length, 1);
+    assert.equal(clientB.isPairedClient, true);
+    assert.equal(clientB.accessState, "authorized");
+    assert.equal(clientA.isPairedClient, false);
+    assert.equal(clientA.accessState, "not_paired");
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("device auth validation rejects authorized clients without a paired client", async () => {
+  const deviceCode = "badpair1";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await assert.rejects(
+      updateDeviceAuth(deviceCode, {
+        clients: [
+          {
+            accessState: "authorized",
+            clientId: "client-a",
+            isPairedClient: false
+          }
+        ],
+        deviceCode,
+        secretHash: hashDeviceSecret("secret-alpha")
+      }),
+      /authorized client requires one isPairedClient=true entry/
+    );
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("device auth validation rejects multiple paired clients", async () => {
+  const deviceCode = "badpair2";
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await assert.rejects(
+      updateDeviceAuth(deviceCode, {
+        clients: [
+          {
+            accessState: "authorized",
+            clientId: "client-a",
+            isPairedClient: true
+          },
+          {
+            accessState: "authorized",
+            clientId: "client-b",
+            isPairedClient: true
+          }
+        ],
+        deviceCode,
+        secretHash: hashDeviceSecret("secret-alpha")
+      }),
+      /only one client may have isPairedClient=true/
+    );
+  } finally {
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("stale client activity older than 48 hours is cleaned up during status polling", async () => {
+  const deviceCode = "heartbt5";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const staleSeenAt = new Date(Date.now() - (49 * 60 * 60 * 1000)).toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "pending"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "pending",
+          clientId: "stale-client",
+          isPairedClient: false,
+          lastSeenAt: staleSeenAt,
+          userAgent: "StaleClient/1.0"
+        }
+      ],
+      deviceCode,
+      updatedAt: staleSeenAt
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/device/${deviceCode}/status`);
+
+      assert.equal(response.status, 200);
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+
+    assert.equal(
+      deviceAuth.clients.some((client) => client.clientId === "stale-client"),
+      false
+    );
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("admin overview Seen uses official heartbeat instead of unpaired client activity", async () => {
+  const deviceCode = "heartbt6";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const threeMinutesAgo = new Date(Date.now() - (3 * 60 * 1000)).toISOString();
+  const now = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "paired-client",
+          isPairedClient: true,
+          lastSeenAt: threeMinutesAgo,
+          userAgent: "PairedClient/1.0"
+        },
+        {
+          accessState: "auth_mismatch",
+          clientId: "other-client",
+          isPairedClient: false,
+          lastSeenAt: now,
+          userAgent: "OtherClient/1.0"
+        }
+      ],
+      deviceCode,
+      lastStatusAt: threeMinutesAgo,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: now
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(`${baseUrl}/admin/devices`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /Seen: 3m ago/);
       });
     });
   } finally {
@@ -736,12 +2013,19 @@ test("authorized layout fragment request returns attributed layout markup", asyn
         },
         method: "POST"
       });
-      const cookieHeader = authResponse.headers.get("set-cookie");
+      const cookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      await pairDeviceToClient(
+        deviceCode,
+        getCookieValue(getCookiePair(authResponse, "mydashmaster_device_client"))
+      );
       const fragmentResponse = await fetch(
         `${baseUrl}/api/device/${deviceCode}/layout-fragment`,
         {
           headers: {
-            Cookie: cookieHeader.split(";")[0]
+            Cookie: cookieHeader
           }
         }
       );
@@ -819,7 +2103,7 @@ test("admin session cookie is marked secure behind forwarded https", async () =>
         method: "POST",
         redirect: "manual"
       });
-      const cookieHeader = response.headers.get("set-cookie");
+      const cookieHeader = getSetCookieValues(response).join("\n");
 
       assert.equal(response.status, 302);
       assert.match(cookieHeader, /mydashmaster_admin=/);
@@ -936,7 +2220,7 @@ test("device session cookie is marked secure behind forwarded https", async () =
         },
         method: "POST"
       });
-      const cookieHeader = response.headers.get("set-cookie");
+      const cookieHeader = getSetCookieValues(response).join("\n");
 
       assert.equal(response.status, 200);
       assert.match(cookieHeader, /mydashmaster_device=/);
@@ -976,7 +2260,14 @@ test("successful authorized device page access updates activity metadata", async
       assert.equal(authResponse.status, 200);
       assert.deepEqual(authPayload, { status: "approved" });
 
-      const cookieHeader = authResponse.headers.get("set-cookie");
+      const cookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+      await pairDeviceToClient(
+        deviceCode,
+        getCookieValue(getCookiePair(authResponse, "mydashmaster_device_client"))
+      );
 
       assert.match(cookieHeader, /mydashmaster_device=/);
 
@@ -984,7 +2275,7 @@ test("successful authorized device page access updates activity metadata", async
 
       const pageResponse = await fetch(`${baseUrl}/d/${deviceCode}`, {
         headers: {
-          Cookie: cookieHeader.split(";")[0],
+          Cookie: cookieHeader,
           "X-Forwarded-For": "198.51.100.20"
         }
       });
@@ -1032,6 +2323,16 @@ test("failed device page access does not update activity metadata", async () => 
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          accessState: "authorized",
+          clientId: "paired-client",
+          isPairedClient: true,
+          lastAuthenticatedAt: "2026-04-12T00:00:00.000Z",
+          lastSeenAt: "2026-04-12T00:00:00.000Z",
+          userAgent: "PairedClient/1.0"
+        }
+      ],
       deviceCode,
       lastConnectedAt: "2026-04-12T00:00:00.000Z",
       lastKnownIp: "198.51.100.30",

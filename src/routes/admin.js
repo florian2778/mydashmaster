@@ -18,6 +18,7 @@ const {
   deleteDevice,
   listDevices,
   listLayouts,
+  pairDeviceToClient,
   readDevice,
   readLayoutRecord,
   requestDeviceReload,
@@ -48,7 +49,21 @@ function formatDateOnly(value) {
   return `${day}.${month}.${year}`;
 }
 
-function formatSeenSeconds(value) {
+function formatAbsoluteTimestamp(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  return date.toISOString();
+}
+
+function formatRelativeSeen(value) {
   if (!value) {
     return "-";
   }
@@ -64,7 +79,36 @@ function formatSeenSeconds(value) {
     Math.floor((Date.now() - date.getTime()) / 1000)
   );
 
-  return `${diffSeconds}s`;
+  if (diffSeconds < 5) {
+    return "just now";
+  }
+
+  if (diffSeconds < 60) {
+    return `${diffSeconds}s ago`;
+  }
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  const diffHours = Math.floor(diffMinutes / 60);
+
+  if (diffHours < 24) {
+    return `${diffHours}h ago`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
+function shortenClientId(value) {
+  if (typeof value !== "string" || value === "") {
+    return "-";
+  }
+
+  return value.length <= 8 ? value : `${value.slice(0, 8)}...`;
 }
 
 function mapDeviceCard(device) {
@@ -78,10 +122,57 @@ function mapDeviceCard(device) {
     canRevoke: device.status === "approved",
     displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
     displayLastRejectedDate: formatDateOnly(device.lastRejectedAt),
-    displayLastSeen: formatSeenSeconds(device.lastConnectedAt),
+    displayLastSeen: formatRelativeSeen(device.lastStatusAt),
+    detailUrl: `/admin/devices/${device.deviceCode}`,
     displayPairingState: pairingState,
     displayLastIp: device.lastKnownIp || "-",
     displayRejectedIp: device.lastRejectedIp || "-"
+  };
+}
+
+function buildClientDisplay(client) {
+  return {
+    ...client,
+    canBePaired: Boolean(client.lastAuthenticatedAt),
+    displayClientId: shortenClientId(client.clientId),
+    displayLastAuthenticatedAt: formatAbsoluteTimestamp(client.lastAuthenticatedAt),
+    displayLastKnownIp: client.lastKnownIp || "-",
+    displayLastSeenAt: formatAbsoluteTimestamp(client.lastSeenAt)
+  };
+}
+
+function buildDeviceDetailViewModel(device, layouts, options = {}) {
+  const pairedClient = Array.isArray(device.clients)
+    ? device.clients.find((client) => client.isPairedClient) || null
+    : null;
+  const additionalClients = Array.isArray(device.clients)
+    ? device.clients
+      .filter((client) => !client.isPairedClient)
+      .map(buildClientDisplay)
+    : [];
+
+  return {
+    actionErrorMessage: options.actionErrorMessage || null,
+    assignableLayouts: getAssignableLayouts(layouts),
+    device: {
+      ...mapDeviceCard(device),
+      displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
+      displayOfficialSeenAbsolute: formatAbsoluteTimestamp(device.lastStatusAt),
+      displayPairingState:
+        pairedClient ? "paired active client" : "not paired"
+    },
+    canPairClients: device.hasSecret && device.status === "approved",
+    officialPairedClient: pairedClient
+      ? {
+        ...buildClientDisplay(pairedClient),
+        displaySeen: formatRelativeSeen(device.lastStatusAt),
+        lastConnectedAt: device.lastConnectedAt || null,
+        displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
+        pairedStateLabel: "paired active client"
+      }
+      : null,
+    additionalClients,
+    pageTitle: device.deviceCode
   };
 }
 
@@ -215,6 +306,32 @@ function renderLoginPage(res, options = {}) {
     pageTitle: "Admin Login",
     usernameValue
   });
+}
+
+async function renderDeviceDetailPage(res, deviceCode, options = {}) {
+  const { actionErrorMessage = null, httpStatus = 200 } = options;
+  const [devices, layouts] = await Promise.all([listDevices(), listLayouts()]);
+  const device = devices.find((entry) => entry.deviceCode === deviceCode);
+
+  if (!device) {
+    return res.status(404).render("pages/device-unknown", {
+      pageTitle: "Unknown device",
+      deviceCode
+    });
+  }
+
+  return res.status(httpStatus).render(
+    "pages/admin-device-detail",
+    buildDeviceDetailViewModel(device, layouts, { actionErrorMessage })
+  );
+}
+
+function redirectAfterDeviceAction(req, res, deviceCode) {
+  if (req.body?.returnTo === "detail") {
+    return res.redirect(`/admin/devices/${deviceCode}`);
+  }
+
+  return res.redirect("/admin/devices");
 }
 
 router.get("/login", (req, res) => {
@@ -379,6 +496,16 @@ router.get("/devices", async (req, res, next) => {
   }
 });
 
+router.get("/devices/:deviceCode", async (req, res, next) => {
+  try {
+    const { deviceCode } = req.params;
+
+    await renderDeviceDetailPage(res, deviceCode);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/devices", async (req, res, next) => {
   try {
     const layoutId =
@@ -479,7 +606,39 @@ router.post("/devices/:deviceCode/layout", async (req, res, next) => {
       layoutId: nextLayoutId
     });
 
-    res.redirect("/admin/devices");
+    redirectAfterDeviceAction(req, res, deviceCode);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/devices/:deviceCode/pair-client", async (req, res, next) => {
+  try {
+    const { deviceCode } = req.params;
+    const clientId =
+      typeof req.body?.clientId === "string" ? req.body.clientId.trim() : "";
+
+    if (!clientId) {
+      return renderDeviceDetailPage(res, deviceCode, {
+        actionErrorMessage: "Select a valid client before pairing.",
+        httpStatus: 400
+      });
+    }
+
+    try {
+      await pairDeviceToClient(deviceCode, clientId);
+    } catch (error) {
+      if (error?.name === "ValidationError") {
+        return renderDeviceDetailPage(res, deviceCode, {
+          actionErrorMessage: error.message,
+          httpStatus: 400
+        });
+      }
+
+      throw error;
+    }
+
+    return res.redirect(`/admin/devices/${deviceCode}`);
   } catch (error) {
     next(error);
   }
@@ -494,7 +653,7 @@ router.post("/devices/:deviceCode/approve", async (req, res, next) => {
       await updateDevice(deviceCode, { status: "approved" });
     }
 
-    res.redirect("/admin/devices");
+    redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
     next(error);
   }
@@ -507,7 +666,7 @@ router.post("/devices/:deviceCode/revoke", async (req, res, next) => {
     await revokeDeviceAuth(deviceCode);
     await updateDevice(deviceCode, { status: "revoked" });
 
-    res.redirect("/admin/devices");
+    redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
     next(error);
   }
@@ -519,7 +678,7 @@ router.post("/devices/:deviceCode/reset-pairing", async (req, res, next) => {
 
     await resetDevicePairing(deviceCode);
 
-    res.redirect("/admin/devices");
+    redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
     next(error);
   }
@@ -531,7 +690,7 @@ router.post("/devices/:deviceCode/reload", async (req, res, next) => {
 
     await requestDeviceReload(deviceCode);
 
-    res.redirect("/admin/devices");
+    redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
     next(error);
   }

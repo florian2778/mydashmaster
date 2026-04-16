@@ -4,6 +4,7 @@ const {
   shouldUseSecureCookies
 } = require("../http/request-context");
 
+const DEVICE_CLIENT_COOKIE = "mydashmaster_device_client";
 const DEVICE_SESSION_COOKIE = "mydashmaster_device";
 
 function getSessionSecret() {
@@ -19,6 +20,10 @@ function createSessionToken(deviceCode, secretHash) {
     .createHmac("sha256", getSessionSecret())
     .update(`${deviceCode}:${secretHash}`)
     .digest("hex");
+}
+
+function createClientId() {
+  return crypto.randomBytes(16).toString("hex");
 }
 
 function parseCookies(headerValue) {
@@ -61,6 +66,37 @@ function hasValidDeviceSession(req, deviceCode, secretHash) {
   return crypto.timingSafeEqual(tokenBuffer, expectedBuffer);
 }
 
+function readDeviceClientId(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  const clientId = cookies[DEVICE_CLIENT_COOKIE];
+
+  if (typeof clientId !== "string" || clientId.trim() === "") {
+    return null;
+  }
+
+  return clientId;
+}
+
+function ensureDeviceClientId(req, res) {
+  const existingClientId = readDeviceClientId(req);
+
+  if (existingClientId) {
+    return existingClientId;
+  }
+
+  const clientId = createClientId();
+
+  res.cookie(DEVICE_CLIENT_COOKIE, clientId, {
+    httpOnly: true,
+    maxAge: 1000 * 60 * 60 * 24 * 365,
+    path: "/",
+    sameSite: "lax",
+    secure: shouldUseSecureCookies(req)
+  });
+
+  return clientId;
+}
+
 function setDeviceSessionCookie(req, res, deviceCode, secretHash) {
   res.cookie(DEVICE_SESSION_COOKIE, createSessionToken(deviceCode, secretHash), {
     httpOnly: true,
@@ -82,8 +118,10 @@ function clearDeviceSessionCookie(req, res, deviceCode) {
 
 module.exports = {
   clearDeviceSessionCookie,
+  ensureDeviceClientId,
   getRequestIp,
   hashDeviceSecret,
   hasValidDeviceSession,
+  readDeviceClientId,
   setDeviceSessionCookie
 };

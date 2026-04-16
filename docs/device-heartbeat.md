@@ -50,8 +50,8 @@ Field:
 - `lastStatusAt` (string, optional)
 
 Meaning:
-- timestamp of the last accepted device status poll
-- represents recent liveness/contact
+- timestamp of the last accepted official device heartbeat
+- represents recent liveness/contact of the paired active client
 - used for operational presence display only
 
 Format:
@@ -73,6 +73,12 @@ Example:
 
 ## Update Rule
 
+`lastStatusAt` is the timestamp of the official device heartbeat.
+
+The official device heartbeat is the device-level liveness signal used for:
+- `Seen`
+- `Online`
+
 `lastStatusAt` should be updated only by the normal status polling path.
 
 Recommended source:
@@ -80,29 +86,98 @@ Recommended source:
 
 Update condition:
 - request is for a known device
-- request belongs to the normal trusted device flow
-- device access state is meaningful for polling
-
-Recommended MVP-safe rule:
-
-Update `lastStatusAt` when:
-- device exists
 - request reaches the status endpoint successfully
-- device is in one of these access-relevant states:
-  - `authorized`
-  - `pending`
-  - `not_paired`
-  - `auth_mismatch`
-  - `revoked`
+- request belongs to the paired active client
+
+Rule:
+- ONLY the paired active client updates `lastStatusAt`
+
+This means:
+- `lastStatusAt` is device-level truth
+- `lastStatusAt` is not a counter of all browsers polling for the same `deviceCode`
 
 Do not update it for:
 - `unknown`
 - malformed requests
 - unrelated endpoints
+- additional unpaired client activity
 
 Reason:
-- `lastStatusAt` should mean “the device/browser is still polling”
-- not “a random request mentioning this device code happened”
+- `lastStatusAt` should mean “the paired active client is still polling”
+- not “any browser mentioning this device code is still polling”
+
+---
+
+## Device-Level Heartbeat vs Client Activity
+
+Two concepts must stay separate:
+
+- official device heartbeat
+  - represented by `lastStatusAt`
+  - updated only by the paired active client
+  - drives `Seen` and `Online`
+
+- client activity
+  - diagnostic observation of browser activity for one `deviceCode`
+  - may include the paired active client and additional unpaired clients
+  - must not redefine device-level truth
+
+Client identity rule:
+- client activity is tracked per `clientId`
+- `clientId` is generated server-side
+- `clientId` is stored in a browser cookie
+- `clientId` survives reloads
+- `clientId` is browser-profile scoped, not tab-scoped
+- `clientId` is used only for client activity tracking, not as an auth factor by itself
+
+Authenticated browser session rule:
+- a valid device session cookie represents an authenticated browser session
+- authenticated browser session is separate from `clientId`
+- authenticated browser session is separate from explicit admin pairing
+- a browser may have a valid authenticated browser session and still remain `not_paired`
+- only a browser that is both:
+  - authenticated via valid device session
+  - explicitly paired as the paired active client
+  may contribute the official device heartbeat
+
+Paired active client rule:
+- a paired active client is the single official client context for one `deviceCode`
+- exactly one client may have `isPairedClient = true` per `deviceCode`
+- when a new client becomes the paired active client, the previous one must lose `isPairedClient = true` immediately
+
+Important rule:
+- unpaired clients MUST NOT affect Seen or Online
+
+This includes:
+- pending client activity
+- auth_mismatch client activity
+- revoked client activity
+- not_paired client activity
+- additional unpaired client activity
+
+Client activity update rule:
+- update `clients[].lastSeenAt` only for:
+  - known `deviceCode`
+  - syntactically valid request
+  - real device status endpoint request
+  - `accessState` in:
+    - `authorized`
+    - `pending`
+    - `auth_mismatch`
+    - `revoked`
+    - `not_paired`
+- do not update it for:
+  - unknown device
+  - malformed request
+  - unrelated endpoints
+
+Post-reset recovery rule:
+- after reset pairing, no client is the paired active client
+- `lastStatusAt` must stop advancing until a new paired active client exists
+- a fresh browser may authenticate again and establish a valid device session
+- that browser still remains `not_paired` until explicit admin pairing
+- `auth_mismatch` must only mean:
+  - another paired active client already exists
 
 ---
 
@@ -167,6 +242,20 @@ Recommended display priority:
 
 This avoids collapsing two different meanings into one label.
 
+Formatting rule:
+- timestamps remain stored as full ISO timestamps
+- formatting is a UI concern only
+- Device Overview shows official `Seen` as relative time
+  - e.g. `Seen just now`
+  - e.g. `Seen 12s ago`
+  - e.g. `Seen 3m ago`
+- Device Detail may show the paired active client `Seen` as relative time with an absolute timestamp as secondary information
+- additional unpaired client activity should show `lastSeenAt` as an absolute timestamp by default
+
+Important rule:
+- `Seen` always refers to the official device heartbeat
+- `Seen` must never be derived from additional unpaired client activity
+
 ---
 
 ## Device State Interaction
@@ -175,17 +264,21 @@ The heartbeat should remain separate from device lifecycle state.
 
 Examples:
 
-- `pending` + recent `lastStatusAt`
-  - device/browser is active
-  - but not yet authorized
+- paired active client + recent `lastStatusAt`
+  - official device heartbeat is current
+  - device may be shown as recently seen / online
 
-- `auth_mismatch` + recent `lastStatusAt`
-  - device/browser is active
-  - but in the wrong browser/session
+- additional unpaired client activity in `pending`
+  - browser activity exists
+  - but `Seen` and `Online` remain unchanged
 
-- `revoked` + recent `lastStatusAt`
-  - browser is still polling
-  - device is not allowed to access layout
+- additional unpaired client activity in `auth_mismatch`
+  - browser activity exists
+  - but `Seen` and `Online` remain unchanged
+
+- additional unpaired client activity in `revoked`
+  - browser activity exists
+  - but `Seen` and `Online` remain unchanged
 
 Therefore:
 - `online` must never imply `authorized`
@@ -210,10 +303,13 @@ If an `Online` badge is later added:
 Minimal implementation sequence:
 
 1. Add `lastStatusAt` as an optional field in device-auth validation/docs
-2. Update the device status endpoint to write it on accepted status polls
-3. Expose it in admin device listing data
-4. Show `Seen` based on `lastStatusAt`
-5. Optionally derive `Online` from the threshold rule
+2. Add optional `clients[]` tracking for client activity
+3. Update the device status endpoint to:
+   - write the official device heartbeat for the paired active client only
+   - write client activity for valid status requests only
+4. Expose `lastStatusAt` in admin device listing data
+5. Show `Seen` based on `lastStatusAt`
+6. Optionally derive `Online` from the threshold rule
 
 This keeps the rollout incremental and avoids misleading UI.
 

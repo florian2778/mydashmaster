@@ -322,6 +322,78 @@ Dort existieren:
 - `authorized`
 - `revoked`
 
+Außerdem muss die UI zwischen Device-Ebene und Client-Ebene trennen:
+
+- official device heartbeat
+- client activity
+- paired active client
+- additional unpaired client activity
+
+### Device Overview
+
+Die Devices Übersicht zeigt nur Device-Level-Informationen.
+
+Sie zeigt:
+- `Seen` aus `lastStatusAt`
+- optional `Online`, abgeleitet aus `lastStatusAt`
+
+Formatierung:
+- offizielles `Seen` in der Übersicht = relative Darstellung
+- Beispiele:
+  - `Seen just now`
+  - `Seen 12s ago`
+  - `Seen 3m ago`
+
+Sie zeigt nicht:
+- zusätzliche Browser-Clients
+- additional unpaired client activity
+
+Wichtige Regel:
+- `Seen` bezieht sich immer auf den official device heartbeat
+- unpaired Clients dürfen `Seen` und `Online` nicht beeinflussen
+
+### Device Detail
+
+Das Device Detail darf Client-Ebene getrennt darstellen.
+
+Es muss trennen zwischen:
+- Official Paired Client
+- Additional Unpaired Client Activity
+
+Darstellungsempfehlung:
+- Official Paired Client:
+  - `Seen`
+  - `accessState`
+  - optional `userAgent`
+- Additional Unpaired Client Activity:
+  - `lastSeen`
+  - `accessState`
+  - optional `userAgent`
+  - optional Session-Status / letzter erfolgreicher Auth-Zeitpunkt
+
+Formatierung:
+- Official Paired Client:
+  - `Seen` = relative Darstellung
+  - absoluter Zeitstempel darf zusätzlich als Sekundärinformation angezeigt werden
+- Additional Unpaired Client Activity:
+  - `lastSeenAt` wird standardmäßig als absoluter Zeitstempel angezeigt
+- zusätzliche client activity ist diagnostisch, nicht maßgeblich für `Seen` oder `Online`
+
+Wichtige Regel:
+- zusätzliche Clients sind diagnostisch
+- sie sind keine konkurrierenden Device-Zustände
+- `clientId` ist nur Client-Tracking
+- gültige Browser-Session und explizites Admin-Pairing sind getrennte Schritte
+- ein Client darf erst dann als pairbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde
+- nach `Reset Pairing` ist bisherige Auth-/Session-Evidence ungültig und muss für jeden Browser neu aufgebaut werden
+- `not_paired` bedeutet:
+  - aktuell existiert kein paired active client
+  - Browser darf sich authentifizieren und Session aufbauen
+  - Browser bleibt bis zur expliziten Admin-Pairing-Aktion trotzdem `not_paired`
+- `auth_mismatch` bedeutet:
+  - ein anderer paired active client existiert bereits
+  - Bootstrap/Auth-Recovery ist in diesem Zustand blockiert
+
 Deshalb reicht die reduzierte Anzeige:
 - online
 - waiting for approval

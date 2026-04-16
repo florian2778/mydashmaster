@@ -20,6 +20,14 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+const ALLOWED_CLIENT_ACCESS_STATES = new Set([
+  "authorized",
+  "pending",
+  "auth_mismatch",
+  "revoked",
+  "not_paired"
+]);
+
 function isValidSize(size) {
   return /^\d+(\.\d+)?(%|px|fr)$/.test(size);
 }
@@ -98,6 +106,13 @@ function validateDeviceAuth(deviceAuth) {
   }
 
   if (
+    deviceAuth.lastStatusAt !== undefined &&
+    typeof deviceAuth.lastStatusAt !== "string"
+  ) {
+    result.errors.push("Invalid device auth: lastStatusAt must be a string");
+  }
+
+  if (
     deviceAuth.updatedAt !== undefined &&
     typeof deviceAuth.updatedAt !== "string"
   ) {
@@ -146,6 +161,94 @@ function validateDeviceAuth(deviceAuth) {
     !Number.isInteger(deviceAuth.reloadVersion)
   ) {
     result.errors.push("Invalid device auth: reloadVersion must be an integer");
+  }
+
+  if (deviceAuth.clients !== undefined) {
+    if (!Array.isArray(deviceAuth.clients)) {
+      result.errors.push("Invalid device auth: clients must be an array");
+    } else {
+      let pairedClientCount = 0;
+      let authorizedClientCount = 0;
+
+      deviceAuth.clients.forEach((client, index) => {
+        const clientPath = `device auth.clients[${index}]`;
+
+        if (!isPlainObject(client)) {
+          result.errors.push(`Invalid ${clientPath}: expected an object`);
+          return;
+        }
+
+        if (typeof client.clientId !== "string") {
+          result.errors.push(`Invalid ${clientPath}.clientId: must be a string`);
+        }
+
+        if (
+          client.lastSeenAt !== undefined &&
+          typeof client.lastSeenAt !== "string"
+        ) {
+          result.errors.push(`Invalid ${clientPath}.lastSeenAt: must be a string`);
+        }
+
+        if (
+          client.lastAuthenticatedAt !== undefined &&
+          typeof client.lastAuthenticatedAt !== "string"
+        ) {
+          result.errors.push(
+            `Invalid ${clientPath}.lastAuthenticatedAt: must be a string`
+          );
+        }
+
+        if (!ALLOWED_CLIENT_ACCESS_STATES.has(client.accessState)) {
+          result.errors.push(
+            `Invalid ${clientPath}.accessState: must be authorized, pending, auth_mismatch, revoked, or not_paired`
+          );
+        }
+
+        if (client.accessState === "authorized") {
+          authorizedClientCount += 1;
+        }
+
+        if (typeof client.isPairedClient !== "boolean") {
+          result.errors.push(
+            `Invalid ${clientPath}.isPairedClient: must be a boolean`
+          );
+        } else if (client.isPairedClient) {
+          pairedClientCount += 1;
+
+          if (client.accessState !== "authorized") {
+            result.errors.push(
+              `Invalid ${clientPath}: paired client must use accessState "authorized"`
+            );
+          }
+        }
+
+        if (
+          client.userAgent !== undefined &&
+          typeof client.userAgent !== "string"
+        ) {
+          result.errors.push(`Invalid ${clientPath}.userAgent: must be a string`);
+        }
+
+        if (
+          client.lastKnownIp !== undefined &&
+          typeof client.lastKnownIp !== "string"
+        ) {
+          result.errors.push(`Invalid ${clientPath}.lastKnownIp: must be a string`);
+        }
+      });
+
+      if (pairedClientCount > 1) {
+        result.errors.push(
+          "Invalid device auth: only one client may have isPairedClient=true"
+        );
+      }
+
+      if (pairedClientCount === 0 && authorizedClientCount > 0) {
+        result.errors.push(
+          'Invalid device auth: authorized client requires one isPairedClient=true entry'
+        );
+      }
+    }
   }
 
   return result;
