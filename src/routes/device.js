@@ -17,36 +17,66 @@ const {
 const router = express.Router();
 
 function renderClientState(res, deviceCode, clientState, options = {}) {
-  const states = {
-    blocked: {
-      message: "Access not available in this browser",
+  let state = null;
+
+  if (clientState === "blocked") {
+    state = {
+      message: "This browser is not the active one",
       note:
-        "Another browser is currently active for this device. Activating this browser requires an admin action.",
+        "Another browser is currently active for this device. Ask an admin to switch activation if needed.",
       pageTitle: "Access not available",
       shouldBootstrap: false,
       shouldPoll: true
-    },
-    pending: {
-      message: "Device pending activation",
-      note: null,
-      pageTitle: "Device pending activation",
-      shouldBootstrap: true,
-      shouldPoll: true
-    },
-    revoked: {
+    };
+  } else if (clientState === "revoked") {
+    state = {
       message: "Access revoked",
       note:
         "This device no longer has access. Please contact an administrator.",
       pageTitle: "Access revoked",
       shouldBootstrap: false,
       shouldPoll: true
-    }
-  };
-  const state = states[clientState];
+    };
+  } else if (options.deviceStatus !== "approved") {
+    state = {
+      message: "Access pending",
+      note: "This device is waiting for admin approval. Leave this page open.",
+      pageTitle: "Access pending",
+      shouldBootstrap: true,
+      shouldPoll: true
+    };
+  } else if (options.isActivatable) {
+    state = {
+      message: "Waiting for activation",
+      note: "This browser is ready. Ask an admin to activate it for this device.",
+      pageTitle: "Waiting for activation",
+      shouldBootstrap: true,
+      shouldPoll: true
+    };
+  } else if (options.isAuthenticated) {
+    state = {
+      message: "Waiting for activation",
+      note:
+        "This browser is authenticated. Keep this page open while an admin activates it.",
+      pageTitle: "Waiting for activation",
+      shouldBootstrap: true,
+      shouldPoll: true
+    };
+  } else {
+    state = {
+      message: "Preparing activation",
+      note:
+        "This browser is establishing access in the background. Leave this page open.",
+      pageTitle: "Preparing activation",
+      shouldBootstrap: true,
+      shouldPoll: true
+    };
+  }
 
   return res.render("pages/device-pending", {
     clientState,
     clientId: options.clientId || null,
+    deviceStatus: options.deviceStatus || null,
     deviceCode,
     isAuthenticated: Boolean(options.isAuthenticated),
     isActivatable: Boolean(options.isActivatable),
@@ -96,6 +126,7 @@ router.get("/:deviceCode", async (req, res, next) => {
 
       return renderClientState(res, deviceCode, derivedState.state, {
         clientId,
+        deviceStatus: device.status,
         isAuthenticated: derivedState.isAuthenticated,
         isActivatable: derivedState.isActivatable
       });

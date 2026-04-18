@@ -14,21 +14,25 @@
         <p>Client ID</p>
         <p><code><%= clientId %></code></p>
       <% } %>
-      <p><%= message %></p>
-      <% if (clientState === "pending" && isActivatable) { %>
-        <p class="pending-note">This browser is eligible for activation once the admin selects it.</p>
-      <% } %>
-      <% if (note) { %>
-        <p class="pending-note"><%= note %></p>
-      <% } %>
+      <p id="device-state-message"><%= message %></p>
+      <p class="pending-note" id="device-state-note"><%= note || "" %></p>
     </main>
     <% if (shouldPoll) { %>
       <script>
         (async () => {
           const currentClientState = <%- JSON.stringify(clientState) %>;
+          const approvedDeviceStatus = "approved";
+          const initialDeviceStatus = <%- JSON.stringify(deviceStatus || null) %>;
           const storageKey = "mydashmaster-device-secret";
           const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
+          const initialIsAuthenticated = <%- JSON.stringify(Boolean(isAuthenticated)) %>;
+          const initialIsActivatable = <%- JSON.stringify(Boolean(isActivatable)) %>;
           let isChecking = false;
+          let currentDeviceStatus = initialDeviceStatus;
+          let currentIsAuthenticated = initialIsAuthenticated;
+          let currentIsActivatable = initialIsActivatable;
+          const messageElement = document.getElementById("device-state-message");
+          const noteElement = document.getElementById("device-state-note");
 
           function createDeviceSecret() {
             const bytes = new Uint8Array(32);
@@ -58,9 +62,18 @@
               },
               method: "POST"
             });
-            const payload = await response.json();
+            let payload = null;
 
-            return payload;
+            try {
+              payload = await response.json();
+            } catch (error) {
+              payload = null;
+            }
+
+            return {
+              ok: response.ok,
+              payload
+            };
           }
 
           async function requestStatus() {
@@ -72,6 +85,37 @@
             return response.json();
           }
 
+          function updatePendingCopy() {
+            if (!messageElement || !noteElement || currentClientState !== "pending") {
+              return;
+            }
+
+            if (currentDeviceStatus !== approvedDeviceStatus) {
+              messageElement.textContent = "Access pending";
+              noteElement.textContent =
+                "This device is waiting for admin approval. Leave this page open.";
+              return;
+            }
+
+            if (currentIsActivatable) {
+              messageElement.textContent = "Waiting for activation";
+              noteElement.textContent =
+                "This browser is ready. Ask an admin to activate it for this device.";
+              return;
+            }
+
+            if (currentIsAuthenticated) {
+              messageElement.textContent = "Waiting for activation";
+              noteElement.textContent =
+                "This browser is authenticated. Keep this page open while an admin activates it.";
+              return;
+            }
+
+            messageElement.textContent = "Preparing activation";
+            noteElement.textContent =
+              "This browser is establishing access in the background. Leave this page open.";
+          }
+
           async function checkPendingState() {
             if (isChecking) {
               return;
@@ -80,10 +124,13 @@
             isChecking = true;
 
             try {
-              if (<%= shouldBootstrap ? "true" : "false" %>) {
+              if (<%= shouldBootstrap ? "true" : "false" %> && !currentIsAuthenticated) {
                 const deviceSecret = getDeviceSecret();
-                const authPayload = await requestBootstrap(deviceSecret);
+                const authResult = await requestBootstrap(deviceSecret);
 
+                if (authResult.ok) {
+                  currentIsAuthenticated = true;
+                }
               }
 
               const statusPayload = await requestStatus();
@@ -91,6 +138,11 @@
               if (!statusPayload || typeof statusPayload.clientState !== "string") {
                 return;
               }
+
+              currentDeviceStatus = statusPayload.status || currentDeviceStatus;
+              currentIsAuthenticated = statusPayload.isAuthenticated === true;
+              currentIsActivatable = statusPayload.isActivatable === true;
+              updatePendingCopy();
 
               if (statusPayload.clientState === "active" && statusPayload.authorized === true) {
                 window.location.reload();
@@ -116,6 +168,7 @@
           }
 
           try {
+            updatePendingCopy();
             await checkPendingState();
             window.setInterval(checkPendingState, pollIntervalMs);
           } catch (error) {

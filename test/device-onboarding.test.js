@@ -179,12 +179,14 @@ test("true pending page keeps bootstrap and status checks active", async () => {
       const body = await response.text();
 
       assert.equal(response.status, 200);
-      assert.match(body, /Device pending activation/);
+      assert.match(body, /Access pending/);
+      assert.match(body, /waiting for admin approval/i);
       assert.match(body, /\/api\/device\/pending01\/auth/);
       assert.match(body, /\/api\/device\/pending01\/status/);
       assert.match(body, /const currentClientState = "pending"/);
       assert.match(body, /setInterval\(checkPendingState, pollIntervalMs\)/);
       assert.match(body, /typeof statusPayload\.clientState !== "string"/);
+      assert.match(body, /if \(true && !currentIsAuthenticated\)/);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -214,13 +216,13 @@ test("device without active client shows pending activation state", async () => 
       );
 
       assert.equal(response.status, 200);
-      assert.match(body, /Device pending activation/);
+      assert.match(body, /Preparing activation/);
       assert.match(body, /Client ID/);
       assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/notpair1\/auth/);
       assert.match(body, /\/api\/device\/notpair1\/status/);
       assert.match(body, /const currentClientState = "pending"/);
-      assert.match(body, /if \(true\)/);
+      assert.match(body, /establishing access in the background/i);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -259,12 +261,12 @@ test("approved device without active client stays pending even without a valid s
       );
 
       assert.equal(response.status, 200);
-      assert.match(body, /Device pending activation/);
+      assert.match(body, /Preparing activation/);
       assert.match(body, /Client ID/);
       assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/mismatch\/status/);
       assert.match(body, /const currentClientState = "pending"/);
-      assert.match(body, /if \(true\)/);
+      assert.match(body, /establishing access in the background/i);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -294,7 +296,7 @@ test("revoked device shows distinct revoked state", async () => {
       assert.match(body, /Access revoked/);
       assert.match(body, /This device no longer has access/);
       assert.match(body, /const currentClientState = "revoked"/);
-      assert.match(body, /if \(false\)/);
+      assert.match(body, /if \(false && !currentIsAuthenticated\)/);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -1526,10 +1528,10 @@ test("fresh browser after reset can authenticate, stays pending, and becomes off
       const browserTwoClientId = getCookieValue(browserTwoClientCookie);
 
       assert.equal(browserTwoPage.status, 200);
-      assert.match(browserTwoPageBody, /Device pending activation/);
+      assert.match(browserTwoPageBody, /Preparing activation/);
       assert.match(browserTwoPageBody, /Client ID/);
       assert.match(browserTwoPageBody, new RegExp(browserTwoClientId));
-      assert.match(browserTwoPageBody, /if \(true\)/);
+      assert.match(browserTwoPageBody, /establishing access in the background/i);
       assert.match(browserTwoClientCookie, /mydashmaster_device_client=/);
 
       const browserTwoAuth = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
@@ -2405,7 +2407,7 @@ test("failed device page access does not update activity metadata", async () => 
       });
 
       assert.equal(response.status, 200);
-      assert.match(await response.text(), /Access not available in this browser/);
+      assert.match(await response.text(), /This browser is not the active one/);
     });
 
     const deviceAuth = await readDeviceAuth(deviceCode);
