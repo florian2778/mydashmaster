@@ -1,131 +1,148 @@
 # Device Access Lifecycle & Admin UX
 
 ## Ziel
+
 Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Device-Zugriffe.
 
 ---
 
-## Zustände
+## Device- und Client-Ebene
 
-- unknown
-- pending
-- not_paired
-- auth_mismatch
-- authorized
-- revoked
+Es gibt zwei Ebenen:
+
+- Device-Ebene
+  - `device.status`: `pending`, `approved`, `revoked`
+- Client-Ebene
+  - sichtbarer Client-Zustand: `pending`, `active`, `blocked`
+
+Mehrere Browser-Clients pro `deviceCode` sind möglich.
+
+Wichtige Regel:
+- genau EIN active client existiert
+- weitere Browser sind client-level observations
+- diese sind keine konkurrierenden Device-Zustände
 
 ---
 
-## Zustandsbeschreibung
+## Sichtbare Client-Zustände
 
 ### pending
-- Device existiert, aber nicht freigegeben
-- Bootstrap aktiv
-- Polling aktiv
-- Bei Approval darf die Waiting Page nicht allein wegen `status = approved` ins Layout wechseln
-- Finaler Wechsel erst bei `accessState = authorized`
 
-### not_paired
-- Device ist freigegeben, aber aktuell kein paired active client existiert
-- nach `Reset Pairing` wird der aktive `secretHash` entfernt
-- danach entsteht der nächste aktive `secretHash` erst wieder durch erfolgreichen Bootstrap/Auth
-- Re-Pairing / Recovery erlaubt
-- Bootstrap aktiv
-- Erfolgreicher Bootstrap/Auth validiert den Secret-Flow und setzt oder erneuert die Session für den aktuellen Browser
-- Ergebnis danach zunächst weiter: `not_paired`
-- offizieller Zugriff entsteht erst nach expliziter Admin-Pairing-Aktion für diesen `clientId`
+- dieser Client ist nicht aktiv
+- aktuell existiert für dieses Device noch kein active client
+- Bootstrap/Auth ist erlaubt
+- ein erfolgreicher Auth-Aufbau macht den Client nur aktivierbar, nicht sofort offiziell
 
-### auth_mismatch
-- Device hat bereits einen paired active client, aber dieser Browser ist nicht der offizielle Client
-- Kein Bootstrap
-- Nur Polling
+### active
 
-### authorized
-- Zugriff vollständig erlaubt
-- Layout sichtbar
+- dieser Client ist der offizielle active client für das Device
+- nur dieser Client darf das Layout sehen
+- nur dieser Client darf den official device heartbeat fortschreiben
+
+### blocked
+
+- dieser Client ist nicht aktiv
+- ein anderer Client ist bereits der active client
+- kein Bootstrap/Re-Activation automatisch
+- Recovery nur über Admin-Aktion
 
 ### revoked
-- Zugriff entzogen
-- Kein Bootstrap
-- Kein Zugriff
 
----
-
-## Übergänge
-
-- pending → authorized (nach erfolgreichem Pairing + Approval)
-- authorized → not_paired (Reset pairing)
-- authorized → revoked (Revoke)
-- auth_mismatch → not_paired (Reset pairing)
-- not_paired → authorized (Auth/Session erfolgreich + explizites Admin-Pairing)
+- Device-Zugriff vollständig entzogen
+- kein Bootstrap
+- kein Zugriff
 
 ---
 
 ## Wichtige Regeln
 
-- approved allein reicht nicht → authorized ist entscheidend
-- not_paired muss immer recoverbar sein
-- auth_mismatch darf nicht automatisch re-pairen
-- revoked ist final (bis Admin eingreift)
-
-### Mehrere Browser-Clients pro deviceCode
-
-Mehrere Browser-Clients pro `deviceCode` sind möglich.
-
-Dabei gilt:
-- genau EIN paired active client existiert
-- weitere Browser-Clients sind client-level observations
-
-Diese client-level observations sind:
-- pending
-- auth_mismatch
-- revoked
-- not_paired
-
-Wichtige Präzisierung:
-- diese Zustände sind keine konkurrierenden Device-Zustände
-- sie sind client-level observations
-- nur der paired active client repräsentiert den offiziellen Device-Zugriff
-- zusätzliche Browser gelten als additional unpaired client activity
-- genau ein Client darf `isPairedClient = true` haben
-- wenn ein neuer Client paired active client wird, verliert der bisherige Client `isPairedClient = true` sofort
-
-Definition des paired active client:
-- der paired active client ist der einzelne offizielle Client-Kontext für ein `deviceCode`
-- er liefert den official device heartbeat
-- er ist nicht nur „ein weiterer gültiger Browser“, sondern die exklusive offizielle Client-Zuordnung
+- approved allein reicht nicht
+- Layoutzugriff erfordert:
+  - active client
+  - gültige technische Authentifizierung für den aktuellen Secret-Zyklus
+- Authentication ist technische Voraussetzung, nicht Hauptzustand
+- Aktivierung ist immer eine explizite Admin-Entscheidung
+- blocked darf nie automatisch re-aktivieren
 
 ---
 
-## Race Condition Regel
+## Mehrere Browser-Clients pro deviceCode
 
-Ein Device darf erst ins Layout wechseln, wenn:
-- authorized = true
+Mehrere Browser-Clients können gleichzeitig sichtbar sein.
 
-Nicht bei:
-- status = approved
-- status = approved und authorized = false
+Dabei gilt:
+- genau ein Client darf `isPairedClient = true` haben
+- wenn ein neuer Client aktiviert wird, verliert der bisherige Client `isPairedClient = true` sofort
+- alle nicht aktiven Clients sind entweder:
+  - `pending`, wenn noch kein offizieller Client existiert
+  - `blocked`, wenn bereits ein offizieller Client existiert
+
+Diese zusätzlichen Browser sind:
+- additional pending or blocked client activity
+
+Sie bleiben diagnostisch und dürfen nie:
+- `Seen` verändern
+- `Online` verändern
+- offiziellen Device-Zustand redefinieren
 
 ---
 
 ## Waiting Page Verhalten
 
-### pending
-- Bootstrap aktiv
-- Auto-Advance bei Erfolg
-- Status-Polling darf einen Reload nur auslösen, wenn `accessState` sich wirklich ändert
-- `status = approved` allein reicht nicht für den Reload
+### Device pending
 
-### not_paired
+- Device ist noch nicht freigegeben
 - Bootstrap aktiv
-- kein Auto-Advance allein wegen erfolgreichem Auth-Call
-- Erfolgreicher Auth-Call setzt oder erneuert nur die Session für den aktuellen Browser
-- Device bleibt `not_paired`, bis Admin diesen `clientId` explizit pairt
+- Polling aktiv
+- Approval allein darf noch keinen Wechsel ins Layout auslösen
 
-### auth_mismatch
-- Kein Bootstrap
+### Client pending
+
+- Device ist freigegeben
+- aktuell gibt es keinen offiziellen aktiven Client
+- Bootstrap/Auth ist erlaubt
+- erfolgreicher Auth-Call:
+  - setzt oder erneuert die Session
+  - aktualisiert `lastAuthenticatedAt`
+  - lässt den sichtbaren Zustand trotzdem `pending`
+- offizieller Zugriff entsteht erst nach expliziter Admin-Aktivierung
+
+### blocked
+
+- anderer Client ist bereits offiziell aktiv
+- kein Auto-Bootstrap
 - Reload nur bei Zustandswechsel
-- Typischer Recovery-Pfad: Admin führt `Reset Pairing` aus, danach Wechsel zu `not_paired`
+
+---
+
+## Reset Activation
+
+Reset activation muss:
+- den aktuellen offiziellen Aktivierungszustand entfernen
+- für alle Clients:
+  - `isPairedClient = false`
+
+Nach Reset:
+- kein Client ist aktiv
+- alle bekannten Clients leiten zu `pending` ab
+- das Layout verschwindet überall
+- bekannte technisch authentifizierte Clients dürfen technisch authentifiziert bleiben
+- solche Clients dürfen sofort wieder direkt aktiviert werden, wenn sie noch aktuell aktiv sind
+
+---
+
+## Activation Flow
+
+Aktivierung bleibt explizit.
+
+Empfohlener Ablauf:
+1. Browser öffnet `/d/:deviceCode`
+2. Browser authentifiziert sich technisch über `/api/device/:deviceCode/auth`
+3. Browser bleibt sichtbar `pending`
+4. Admin sieht diesen Client in der Detailansicht
+5. Admin führt `Activate` aus
+6. Der gewählte Client wird `active`
+7. Alle anderen Clients werden `blocked`
 
 ---
 
@@ -134,120 +151,22 @@ Nicht bei:
 Referenz für Heartbeat/Liveness:
 - `docs/device-heartbeat.md`
 
-### Informationsanzeige pro Device
+Device Overview zeigt:
+- Device-Status
+- Aktivierungszustand auf Device-Ebene
+- `Seen` aus dem official device heartbeat
+- keine additional pending or blocked client activity
 
-- Status (pending / approved / revoked)
-- Pairing Status (paired / not paired)
-- Letzter Zugriff:
-  - IP-Adresse
-  - Datum (TT.MM.JJJ)
-- Letzte Status-Aktualisierung:
-  - Sekunden seit letztem Kontakt
-
-Wichtige Präzisierung:
-- „letzter Zugriff“ und „letzte Status-Aktualisierung“ sind nicht dasselbe
-- Zugriff basiert auf erfolgreicher autorisierter Device-Nutzung
-- Status-Aktualisierung basiert auf dem official device heartbeat
-- ein späteres `online`-Badge darf nur aus dem Heartbeat-Modell abgeleitet werden
-- additional unpaired client activity darf `Seen` und `Online` nicht beeinflussen
+Device Detail trennt:
+- Official Active Client
+- Additional Pending / Blocked Client Activity
 
 ---
 
-## Button UX (Wichtig!)
+## Minimale Testfälle
 
-Aktuell: 4 Buttons nebeneinander → unübersichtlich
-
-### Ziel:
-
-Klare Hierarchie + bessere Lesbarkeit
-
-Empfohlene Struktur:
-
-1. Primary Actions:
-   - Approve (wenn pending)
-   - Reset Pairing (wenn paired)
-
-2. Secondary Actions:
-   - Revoke
-
-3. Destructive:
-   - Delete (rot, eigener Bereich)
-
-### Umsetzungsideen:
-
-- Buttons gruppieren (z. B. Dropdown oder 2 Zeilen)
-- Icons verwenden
-- Delete klar visuell abheben (rot + Abstand)
-
----
-
-## Reset Pairing (Definition)
-
-- löscht:
-  - secretHash
-  - candidateSecretHash
-- Status bleibt: approved
-- Ergebnis: not_paired
-- alle Clients verlieren `isPairedClient = true`
-- alle Clients werden `accessState = not_paired`
-- alle Clients verlieren ihr bisheriges Auth-/Session-Evidence (`lastAuthenticatedAt`)
-- Device kann neu gekoppelt werden
-- nächster erfolgreicher Bootstrap/Auth setzt einen neuen aktiven `secretHash` und die Session für den Browser
-- ein später explizit gepairter Client wird der neue paired active client
-- ein zuvor markierter paired active client verliert dabei sofort `isPairedClient = true`
-
----
-
-## Auth Endpoint Regel
-
-- `pending`:
-  - speichert `candidateSecretHash`
-  - bleibt `pending`
-
-- `not_paired`:
-  - akzeptiert Bootstrap/Auth
-  - validiert `secretHash`
-  - setzt oder erneuert Session/Cookie für den aktuellen Browser
-  - Ergebnis bleibt zunächst: `not_paired`
-  - offizieller Zugriff entsteht erst nach explizitem Admin-Pairing
-
-- `auth_mismatch`:
-  - kein automatisches Re-Pairing
-  - nur Zustandswechsel durch Admin-Aktion
-
----
-
-## Recovery-Regeln
-
-- `pending`:
-  - darf automatisch weiter pollen und bootstrapen
-  - nach Approval bleibt die Waiting Page aktiv, bis Auth erfolgreich ist
-
-- `not_paired`:
-  - darf automatisch bootstrapen / authentifizieren
-  - ein `401` auf dem Auth-Endpoint wäre hier falsch, solange der Secret korrekt ist
-  - bleibt bis zum expliziten Admin-Pairing `not_paired`
-
-- `auth_mismatch`:
-  - darf nicht automatisch re-pairen
-  - Recovery nur über Admin-Aktion und anschließenden Zustandswechsel
-
----
-
-## Testfälle (Minimal Set)
-
-1. Pending → Approval → Authorized
-2. Authorized → Reset Pairing → Not Paired
-3. Not Paired → Re-Pair → Authorized
-4. Authorized → anderer Browser → auth_mismatch
-5. auth_mismatch → Reset Pairing → Recovery
-6. Authorized → Revoke → Zugriff weg
-
----
-
-## Fazit
-
-- Zustände sind korrekt
-- Übergänge müssen strikt eingehalten werden
-- Admin UX braucht Vereinfachung
-- Monitoring (letzter Zugriff + Status) erhöht Transparenz massiv
+1. Pending Device → technischer Auth-Aufbau → explizite Aktivierung
+2. Active Client → Reset activation → alle Clients wieder `pending`
+3. Zweiter Browser bei bestehender Aktivierung → `blocked`
+4. Mehrere `pending` Clients → Admin wählt explizit einen aus
+5. Nur active Client schreibt `lastStatusAt`

@@ -316,18 +316,21 @@ Konflikt mit:
 - `docs/device-heartbeat.md`
 
 Dort existieren:
-- `pending`
-- `not_paired`
-- `auth_mismatch`
-- `authorized`
-- `revoked`
+- Device-Status:
+  - `pending`
+  - `approved`
+  - `revoked`
+- sichtbare Client-Zustände:
+  - `pending`
+  - `active`
+  - `blocked`
 
 Außerdem muss die UI zwischen Device-Ebene und Client-Ebene trennen:
 
 - official device heartbeat
 - client activity
-- paired active client
-- additional unpaired client activity
+- active client
+- additional pending or blocked client activity
 
 ### Device Overview
 
@@ -346,36 +349,36 @@ Formatierung:
 
 Sie zeigt nicht:
 - zusätzliche Browser-Clients
-- additional unpaired client activity
+- additional pending or blocked client activity
 
 Wichtige Regel:
 - `Seen` bezieht sich immer auf den official device heartbeat
-- unpaired Clients dürfen `Seen` und `Online` nicht beeinflussen
+- nicht aktive Clients dürfen `Seen` und `Online` nicht beeinflussen
 
 ### Device Detail
 
 Das Device Detail darf Client-Ebene getrennt darstellen.
 
 Es muss trennen zwischen:
-- Official Paired Client
-- Additional Unpaired Client Activity
+- Official Active Client
+- Additional Pending / Blocked Client Activity
 
 Darstellungsempfehlung:
-- Official Paired Client:
+- Official Active Client:
   - `Seen`
-  - `accessState`
+  - Client-Zustand `active`
   - optional `userAgent`
-- Additional Unpaired Client Activity:
+- Additional Pending / Blocked Client Activity:
   - `lastSeen`
-  - `accessState`
+  - Client-Zustand `pending` oder `blocked`
   - optional `userAgent`
   - optional Session-Status / letzter erfolgreicher Auth-Zeitpunkt
 
 Formatierung:
-- Official Paired Client:
+- Official Active Client:
   - `Seen` = relative Darstellung
   - absoluter Zeitstempel darf zusätzlich als Sekundärinformation angezeigt werden
-- Additional Unpaired Client Activity:
+- Additional Pending / Blocked Client Activity:
   - `lastSeenAt` wird standardmäßig als absoluter Zeitstempel angezeigt
 - zusätzliche client activity ist diagnostisch, nicht maßgeblich für `Seen` oder `Online`
 
@@ -383,15 +386,15 @@ Wichtige Regel:
 - zusätzliche Clients sind diagnostisch
 - sie sind keine konkurrierenden Device-Zustände
 - `clientId` ist nur Client-Tracking
-- gültige Browser-Session und explizites Admin-Pairing sind getrennte Schritte
-- ein Client darf erst dann als pairbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde
-- nach `Reset Pairing` ist bisherige Auth-/Session-Evidence ungültig und muss für jeden Browser neu aufgebaut werden
-- `not_paired` bedeutet:
-  - aktuell existiert kein paired active client
+- gültige Browser-Session und explizite Admin-Aktivierung sind getrennte Schritte
+- ein Client darf erst dann als aktivierbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde und er noch als aktuell aktiv gilt
+- nach `Reset activation` bleibt die technische Auth-Basis bestehen; nur die aktive Zuordnung wird entfernt
+- `pending` bedeutet:
+  - aktuell existiert kein active client
   - Browser darf sich authentifizieren und Session aufbauen
-  - Browser bleibt bis zur expliziten Admin-Pairing-Aktion trotzdem `not_paired`
-- `auth_mismatch` bedeutet:
-  - ein anderer paired active client existiert bereits
+  - Browser bleibt bis zur expliziten Admin-Aktivierung trotzdem `pending`
+- `blocked` bedeutet:
+  - ein anderer active client existiert bereits
   - Bootstrap/Auth-Recovery ist in diesem Zustand blockiert
 
 Deshalb reicht die reduzierte Anzeige:
@@ -415,12 +418,11 @@ Die Devices Übersicht sollte stattdessen spezifizieren:
     - `approved`
     - `revoked`
 - zusätzliche Pairing-Anzeige:
-  - `paired`
-  - `not paired`
+  - `active`
+  - `pending`
 - Diagnosehinweise:
   - letzter Kontakt
   - letzte IP
-  - letzte Ablehnung / Ablehnungsgrund
 
 Wichtige Ergänzung:
 - ein späteres `online`-Badge darf nicht aus `lastConnectedAt` abgeleitet werden
@@ -472,8 +474,8 @@ Detailansicht eines einzelnen Devices
 „Aktionen (noch zu definieren)“ ist zu offen und steht im Konflikt mit dem bereits klareren Lifecycle-/Admin-Stand.
 
 Denn aus `device-access-lifecycle.md` ergeben sich bereits konkrete Aktionen:
-- Approve
-- Reset Pairing
+- Activate
+- Reset activation
 - Revoke
 - Delete
 
@@ -487,8 +489,8 @@ Um Device Detail umsetzbar zu machen, sollten die Aktionen in anderen Specs expl
 
 - `docs/device-access-lifecycle.md`
   - Admin-Aktionen im Detailbereich explizit nennen:
-    - Approve
-    - Reset Pairing
+    - Activate
+    - Reset activation
     - Revoke
     - Delete
     - optional Reload
@@ -501,8 +503,8 @@ Um Device Detail umsetzbar zu machen, sollten die Aktionen in anderen Specs expl
 
 Das Device Detail sollte in diesem Dokument bereits als Zielaktionensatz definieren:
 - Layout ändern
-- Approve
-- Reset Pairing
+- Activate
+- Reset activation
 - Revoke
 - Delete
 - optional Reload

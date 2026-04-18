@@ -9,7 +9,7 @@
         <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
           <%= device.status %>
         </span>
-        <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
+        <span class="layout-edge-indicator"><%= device.displayActivationState %></span>
       </div>
       <% if (device.description) { %>
         <p class="admin-layouts-subtitle"><%= device.description %></p>
@@ -38,44 +38,44 @@
 
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
-      <h2>Official Paired Client</h2>
+      <h2>Official Active Client</h2>
     </div>
 
-    <% if (officialPairedClient) { %>
+    <% if (officialActiveClient) { %>
       <article class="admin-device-client-card admin-device-client-card--official">
         <div class="device-overview-facts device-overview-facts--primary">
-          <span>State: <strong><%= officialPairedClient.pairedStateLabel %></strong></span>
-          <span>Access: <strong><%= officialPairedClient.accessState %></strong></span>
-          <span>Seen: <strong>Seen <%= officialPairedClient.displaySeen %></strong></span>
+          <span>State: <strong><%= officialActiveClient.activeStateLabel %></strong></span>
+          <span>Client state: <strong><%= officialActiveClient.clientState %></strong></span>
+          <span>Seen: <strong>Seen <%= officialActiveClient.displaySeen %></strong></span>
           <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
         </div>
         <div class="device-overview-facts device-overview-facts--secondary">
-          <span>Client: <code title="<%= officialPairedClient.clientId %>"><%= officialPairedClient.displayClientId %></code></span>
-          <span>Last access: <%= officialPairedClient.displayLastConnectedAt %></span>
-          <span>Authenticated: <%= officialPairedClient.displayLastAuthenticatedAt %></span>
-          <span>IP: <%= officialPairedClient.displayLastKnownIp %></span>
-          <span>User-Agent: <%= officialPairedClient.userAgent || "-" %></span>
+          <span>Client: <code title="<%= officialActiveClient.clientId %>"><%= officialActiveClient.displayClientId %></code></span>
+          <span>Last access: <%= officialActiveClient.displayLastConnectedAt %></span>
+          <span>Authenticated: <%= officialActiveClient.displayLastAuthenticatedAt %></span>
+          <span>IP: <%= officialActiveClient.displayLastKnownIp %></span>
+          <span>User-Agent: <%= officialActiveClient.userAgent || "-" %></span>
         </div>
       </article>
     <% } else { %>
-      <p class="admin-layout-detail-empty">No paired client. Device is currently not paired.</p>
+      <p class="admin-layout-detail-empty">No active client. Device is currently pending.</p>
     <% } %>
   </section>
 
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
-      <h2>Additional Unpaired Client Activity</h2>
+      <h2>Additional Pending / Blocked Client Activity</h2>
     </div>
 
     <% if (additionalClients.length === 0) { %>
-      <p class="admin-layout-detail-empty">No additional unpaired client activity.</p>
+      <p class="admin-layout-detail-empty">No additional pending or blocked client activity.</p>
     <% } else { %>
       <div class="admin-device-client-list">
         <% additionalClients.forEach((client) => { %>
           <article class="admin-device-client-card">
             <div class="device-overview-facts device-overview-facts--primary">
               <span>Client: <code title="<%= client.clientId %>"><%= client.displayClientId %></code></span>
-              <span>Access: <strong><%= client.accessState %></strong></span>
+              <span>Client state: <strong><%= client.clientState %></strong></span>
               <span>Last seen: <strong><%= client.displayLastSeenAt %></strong></span>
             </div>
             <div class="device-overview-facts device-overview-facts--secondary">
@@ -83,13 +83,13 @@
               <span>IP: <%= client.displayLastKnownIp %></span>
               <span>User-Agent: <%= client.userAgent || "-" %></span>
             </div>
-            <% if (canPairClients && client.canBePaired) { %>
-              <form action="/admin/devices/<%= device.deviceCode %>/pair-client" method="post">
+            <% if (canActivateClients && client.canActivate) { %>
+              <form action="/admin/devices/<%= device.deviceCode %>/activate-client" method="post">
                 <input type="hidden" name="clientId" value="<%= client.clientId %>">
-                <button class="admin-action-button" type="submit">Pair this client</button>
+                <button class="admin-action-button" type="submit">Activate</button>
               </form>
-            <% } else if (canPairClients) { %>
-              <p class="device-diagnostic-note">Authenticate this browser first before pairing it.</p>
+            <% } else if (canActivateClients) { %>
+              <p class="device-diagnostic-note">Authenticate this browser first and keep it active before activating it.</p>
             <% } %>
           </article>
         <% }) %>
@@ -131,16 +131,10 @@
       <h2>Actions</h2>
     </div>
     <div class="admin-device-detail-actions">
-      <% if (device.canApprove) { %>
-        <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
-          <input type="hidden" name="returnTo" value="detail">
-          <button class="admin-action-button" type="submit">Approve</button>
-        </form>
-      <% } %>
       <% if (device.canResetPairing) { %>
         <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
           <input type="hidden" name="returnTo" value="detail">
-          <button class="admin-action-button admin-action-button--secondary" type="submit">Reset pairing</button>
+          <button class="admin-action-button admin-action-button--secondary" type="submit">Reset activation</button>
         </form>
       <% } %>
       <% if (device.canReload) { %>

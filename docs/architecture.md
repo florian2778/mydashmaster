@@ -123,7 +123,7 @@ A device:
 5. If approved:
    - validate session cookie if present
    - otherwise validate deviceSecret
-6. If validation fails → pending / not authorized
+6. If validation fails → pending page or blocked page
 7. If validation succeeds → render layout
 
 ---
@@ -144,7 +144,7 @@ If layout identity changed:
 then the device updates the visible layout according to the current renderer strategy.
 
 Current target strategy:
-- `authorized -> authorized` layout identity change:
+- `active -> active` layout identity change:
   - client-side layout refresh
 - lifecycle/access-state change:
   - full page reload / server-rendered transition
@@ -152,7 +152,7 @@ Current target strategy:
 Operational liveness:
 - a later admin-side `Seen` / `Online` indicator should be based on a dedicated heartbeat timestamp
 - this timestamp is the official device heartbeat
-- the official device heartbeat is updated by the paired active client only
+- the official device heartbeat is updated by the active client only
 - heartbeat is separate from authorization and separate from `lastConnectedAt`
 - see `docs/device-heartbeat.md`
 
@@ -163,17 +163,11 @@ Client observation:
   - known `deviceCode`
   - syntactically valid request
   - real device status endpoint request
-  - `accessState` in:
-    - `authorized`
-    - `pending`
-    - `auth_mismatch`
-    - `revoked`
-    - `not_paired`
 - do not update client activity for:
   - unknown device
   - malformed request
   - unrelated endpoints
-- only the paired active client contributes the official device heartbeat
+- only the active client contributes the official device heartbeat
 
 Client identity:
 - `clientId` is generated server-side
@@ -186,38 +180,31 @@ Authenticated browser session:
 - a valid device session cookie represents an authenticated browser session
 - authenticated browser session is separate from `clientId`
 - authenticated browser session is separate from explicit admin pairing
-- after reset pairing, a browser may authenticate again and receive a valid device session cookie while still remaining `not_paired`
+- after reset pairing, a browser may authenticate again and receive a valid device session cookie while still remaining `pending`
 
 Exclusivity:
-- a paired active client is the single official client context for one `deviceCode`
+- an active client is the single official client context for one `deviceCode`
 - exactly one client may have `isPairedClient = true` per `deviceCode`
-- when a new client becomes the paired active client, the previous one must lose `isPairedClient = true` immediately
+- when a new client becomes the active client, the previous one must lose `isPairedClient = true` immediately
 
 Separation rule:
 - device-level truth uses the official device heartbeat
-- client-level observation may include additional unpaired client activity
-- additional unpaired client activity must not change `Seen` or `Online`
+- client-level observation may include additional pending or blocked client activity
+- additional pending or blocked client activity must not change `Seen` or `Online`
 - timestamps remain stored as ISO timestamps; display formatting is a UI concern only
 
 Post-reset recovery flow:
-1. Admin resets pairing
-2. No client remains paired
+1. Admin resets activation
+2. No client remains active
 3. Device status stays `approved`
-4. Active `secretHash` is removed
-5. Browser authenticates again and establishes a new active `secretHash`
-6. Server refreshes the authenticated browser session cookie and records authenticated session evidence for that `clientId`
-7. Browser remains `not_paired`
-8. Admin explicitly pairs that `clientId`
-9. Only then may the client become `authorized` and update the official device heartbeat
-
-Reset invalidation rule:
-- reset pairing invalidates previously authenticated browser sessions
-- reset pairing clears client-level authenticated session evidence
-- a browser that was authenticated before reset must authenticate again before it becomes pairable
+4. Active `secretHash` remains in place
+5. Known clients derive to `pending`
+6. Recently active and technically authenticated clients may be activated again immediately
+7. Only an explicitly activated client may render the layout and update the official device heartbeat
 
 State decision rule:
-- `not_paired` means no paired active client currently exists
-- `auth_mismatch` means another paired active client already exists
+- `pending` means no active client currently exists
+- `blocked` means another active client already exists
 
 ---
 

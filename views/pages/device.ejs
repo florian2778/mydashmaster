@@ -18,7 +18,7 @@
     <main class="device-main<%= options.showHeader ? ' container' : '' %>">
       <section class="<%= options.showHeader ? 'panel' : 'device-panel' %>">
         <% if (options.showStatus) { %>
-          <h1>Device approved</h1>
+          <h1>Device active</h1>
         <% } %>
 
         <%- include("../partials/device-layout-root", {
@@ -186,7 +186,7 @@
             if (
               !payload ||
               payload.status !== currentState.status ||
-              payload.accessState !== "authorized" ||
+              payload.clientState !== "active" ||
               payload.authorized !== true
             ) {
               window.location.reload();

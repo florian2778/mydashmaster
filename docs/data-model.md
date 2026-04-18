@@ -86,7 +86,6 @@ Example:
       "clientId": "client-1",
       "lastSeenAt": "2026-04-15T12:00:20Z",
       "lastAuthenticatedAt": "2026-04-15T12:00:10Z",
-      "accessState": "authorized",
       "isPairedClient": true,
       "userAgent": "Mozilla/5.0"
     }
@@ -102,10 +101,10 @@ Fields:
   - active authentication hash for approved devices
 - lastStatusAt (string, optional)
   - official device heartbeat
-  - updated only by the paired active client
+  - updated only by the active client
 - clients (array, optional)
   - diagnostic client activity for one `deviceCode`
-  - may contain the paired active client and additional unpaired client activity
+  - may contain the active client and additional pending or blocked client activity
 - updatedAt (string, optional)
 
 Optional `clients[]` fields:
@@ -120,55 +119,45 @@ Optional `clients[]` fields:
 - lastAuthenticatedAt (string, ISO timestamp, optional)
   - timestamp of the last successful device secret authentication for this browser profile
   - indicates that the browser established or refreshed a valid device session cookie
-  - used as pairing precondition
+  - used as an activation precondition
   - does not make the client official by itself
-  - is cleared on reset pairing because reset invalidates the active authenticated browser sessions
-- accessState (string)
-  - allowed values:
-    - `authorized`
-    - `pending`
-    - `auth_mismatch`
-    - `revoked`
-    - `not_paired`
 - isPairedClient (boolean)
   - exactly one client may have `isPairedClient = true` per `deviceCode`
-  - when a new client becomes the paired active client, the previous one must lose `isPairedClient = true` immediately
+  - when a new client becomes the active client, the previous one must lose `isPairedClient = true` immediately
 - userAgent (string, optional)
+- lastKnownIp (string, optional)
 
 Rules:
 - The plain deviceSecret is never stored on the server.
 - Only a one-way hash is persisted.
-- `candidateSecretHash` is used before approval.
-- `secretHash` is the active authentication hash after approval.
+- `candidateSecretHash` is only used for the legacy device-level pending approval flow, if that flow is still present.
+- `secretHash` is the active authentication hash for the current activation cycle.
 - `lastStatusAt` = official device heartbeat.
 - `clients[].lastSeenAt` = diagnostic only.
 - `clients[].lastAuthenticatedAt` = authenticated browser session evidence only.
-- additional unpaired client activity must not redefine `Seen` or `Online`.
+- additional pending or blocked client activity must not redefine `Seen` or `Online`.
 - `clients[]` stores client activity, not device-level truth.
+- visible client state is derived, not persisted:
+  - `active`
+  - `pending`
+  - `blocked`
 
 Session and pairing rules:
 - `clientId` identifies the browser profile for client activity tracking only.
 - a valid device session cookie represents an authenticated browser session.
-- `isPairedClient = true` represents explicit admin pairing only.
-- after reset pairing, a browser may authenticate again and receive a valid device session cookie while still remaining `not_paired`.
-- reset pairing clears `clients[].lastAuthenticatedAt` for all clients.
-- explicit admin pairing requires a client with recorded `lastAuthenticatedAt`.
+- `isPairedClient = true` represents explicit admin activation only.
+- after reset activation, a browser may stay technically authenticated and still remain visible `pending`.
+- explicit admin activation requires a client with recorded `lastAuthenticatedAt`, current-cycle authentication evidence, and recent activity.
 - only a client that is both:
   - authenticated via valid device session
-  - explicitly paired via `isPairedClient = true`
-  may use `accessState = authorized`
+  - explicitly activated via `isPairedClient = true`
+  may update the official heartbeat and render the layout
 
 Client activity update rule:
 - update `clients[].lastSeenAt` only for:
   - known `deviceCode`
   - syntactically valid request
   - real device status endpoint request
-  - `accessState` in:
-    - `authorized`
-    - `pending`
-    - `auth_mismatch`
-    - `revoked`
-    - `not_paired`
 - do not update it for:
   - unknown device
   - malformed request

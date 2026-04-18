@@ -1,5 +1,6 @@
 const express = require("express");
 
+const { deriveClientState } = require("../device/client-state");
 const {
   clearDeviceSessionCookie,
   ensureDeviceClientId,
@@ -9,34 +10,26 @@ const {
 const { buildDeviceLayoutViewModel } = require("../device/layout-render");
 const {
   recordDeviceActivity,
-  recordDeviceRejection,
   readDevice,
   readDeviceAuth
 } = require("../storage/json-store");
 
 const router = express.Router();
 
-function renderAccessState(res, deviceCode, accessState, options = {}) {
+function renderClientState(res, deviceCode, clientState, options = {}) {
   const states = {
-    auth_mismatch: {
+    blocked: {
       message: "Access not available in this browser",
       note:
-        "This device is already linked to another browser session. Re-linking requires an admin action.",
+        "Another browser is currently active for this device. Activating this browser requires an admin action.",
       pageTitle: "Access not available",
       shouldBootstrap: false,
       shouldPoll: true
     },
-    not_paired: {
-      message: "Device not paired",
-      note: null,
-      pageTitle: "Device not paired",
-      shouldBootstrap: true,
-      shouldPoll: true
-    },
     pending: {
-      message: "Access pending",
+      message: "Device pending activation",
       note: null,
-      pageTitle: "Access pending",
+      pageTitle: "Device pending activation",
       shouldBootstrap: true,
       shouldPoll: true
     },
@@ -49,12 +42,14 @@ function renderAccessState(res, deviceCode, accessState, options = {}) {
       shouldPoll: true
     }
   };
-  const state = states[accessState];
+  const state = states[clientState];
 
   return res.render("pages/device-pending", {
-    accessState,
+    clientState,
     clientId: options.clientId || null,
     deviceCode,
+    isAuthenticated: Boolean(options.isAuthenticated),
+    isActivatable: Boolean(options.isActivatable),
     message: state.message,
     note: state.note,
     pageTitle: state.pageTitle,
@@ -79,49 +74,31 @@ router.get("/:deviceCode", async (req, res, next) => {
 
     if (device.status === "revoked") {
       clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "revoked");
+      return renderClientState(res, deviceCode, "revoked");
     }
 
-    if (device.status === "pending") {
-      clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "pending");
-    }
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const derivedState = deriveClientState({
+      clientId,
+      device,
+      deviceAuth
+    });
 
-    let deviceAuth = await readDeviceAuth(deviceCode);
+    if (
+      device.status !== "approved" ||
+      derivedState.state !== "active" ||
+      !deviceAuth?.secretHash ||
+      !hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)
+    ) {
+      if (derivedState.state === "blocked") {
+        clearDeviceSessionCookie(req, res, deviceCode);
+      }
 
-    const pairedClient = Array.isArray(deviceAuth?.clients)
-      ? deviceAuth.clients.find((client) => client.isPairedClient) || null
-      : null;
-
-    if (!deviceAuth?.secretHash) {
-      clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "not_paired", { clientId });
-    }
-
-    if (!pairedClient) {
-      return renderAccessState(res, deviceCode, "not_paired", { clientId });
-    }
-
-    const hasValidSession = hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash);
-
-    if (!hasValidSession) {
-      await recordDeviceRejection(
-        deviceCode,
-        getRequestIp(req),
-        "auth_mismatch"
-      );
-      clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "auth_mismatch");
-    }
-
-    if (pairedClient.clientId !== clientId) {
-      await recordDeviceRejection(
-        deviceCode,
-        getRequestIp(req),
-        "auth_mismatch"
-      );
-      clearDeviceSessionCookie(req, res, deviceCode);
-      return renderAccessState(res, deviceCode, "auth_mismatch");
+      return renderClientState(res, deviceCode, derivedState.state, {
+        clientId,
+        isAuthenticated: derivedState.isAuthenticated,
+        isActivatable: derivedState.isActivatable
+      });
     }
 
     await recordDeviceActivity(deviceCode, getRequestIp(req));

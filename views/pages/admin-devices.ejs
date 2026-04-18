@@ -6,7 +6,7 @@
       <p class="admin-layouts-eyebrow">Admin</p>
       <h1><%= heading %></h1>
       <p class="admin-layouts-subtitle">
-        Registered devices, their status, and approval controls.
+        Registered devices, their status, and activation controls.
       </p>
     </div>
     <a class="admin-secondary-link" href="/admin">Back to admin</a>
@@ -70,32 +70,15 @@
                 <% } %>
               </div>
 
-              <% if (device.lastRejectedAt || device.lastRejectedIp || device.lastRejectedReason) { %>
-                <p class="device-diagnostic-note">
-                  Last rejected:
-                  <%= device.displayLastRejectedDate %>
-                  <% if (device.lastRejectedIp || device.displayRejectedIp !== "-") { %>
-                    · IP <%= device.displayRejectedIp %>
-                  <% } %>
-                  <% if (device.lastRejectedReason) { %>
-                    · <%= device.lastRejectedReason %>
-                  <% } %>
-                </p>
-              <% } %>
             </div>
           </a>
 
           <div class="device-overview-actions">
             <div class="device-overview-actions-main">
               <a class="admin-action-button admin-action-button--secondary" href="<%= device.detailUrl %>">Details</a>
-              <% if (device.canApprove) { %>
-                <form action="/admin/devices/<%= device.deviceCode %>/approve" method="post">
-                  <button class="admin-action-button" type="submit">Approve</button>
-                </form>
-              <% } %>
               <% if (device.canResetPairing) { %>
                 <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
-                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reset pairing</button>
+                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reset activation</button>
                 </form>
               <% } %>
               <% if (device.canReload) { %>

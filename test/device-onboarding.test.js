@@ -7,8 +7,8 @@ const app = require("../src/app");
 const { hashAdminPassword } = require("../src/auth/admin-auth");
 const { hashDeviceSecret } = require("../src/auth/device-auth");
 const {
+  activateDeviceClient,
   listDeviceCodes,
-  pairDeviceToClient,
   readDevice,
   readDeviceAuth,
   updateDeviceAuth,
@@ -179,12 +179,12 @@ test("true pending page keeps bootstrap and status checks active", async () => {
       const body = await response.text();
 
       assert.equal(response.status, 200);
-      assert.match(body, /Access pending/);
+      assert.match(body, /Device pending activation/);
       assert.match(body, /\/api\/device\/pending01\/auth/);
       assert.match(body, /\/api\/device\/pending01\/status/);
-      assert.match(body, /const currentAccessState = "pending"/);
+      assert.match(body, /const currentClientState = "pending"/);
       assert.match(body, /setInterval\(checkPendingState, pollIntervalMs\)/);
-      assert.doesNotMatch(body, /statusPayload\.status !== "pending"/);
+      assert.match(body, /typeof statusPayload\.clientState !== "string"/);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -192,7 +192,7 @@ test("true pending page keeps bootstrap and status checks active", async () => {
   }
 });
 
-test("approved device without secretHash shows not paired state", async () => {
+test("device without active client shows pending activation state", async () => {
   const deviceCode = "notpair1";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -214,12 +214,12 @@ test("approved device without secretHash shows not paired state", async () => {
       );
 
       assert.equal(response.status, 200);
-      assert.match(body, /Device not paired/);
+      assert.match(body, /Device pending activation/);
       assert.match(body, /Client ID/);
       assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/notpair1\/auth/);
       assert.match(body, /\/api\/device\/notpair1\/status/);
-      assert.match(body, /const currentAccessState = "not_paired"/);
+      assert.match(body, /const currentClientState = "pending"/);
       assert.match(body, /if \(true\)/);
     });
   } finally {
@@ -228,7 +228,7 @@ test("approved device without secretHash shows not paired state", async () => {
   }
 });
 
-test("approved device without paired client stays not_paired even without a valid session", async () => {
+test("approved device without active client stays pending even without a valid session", async () => {
   const deviceCode = "mismatch";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -259,19 +259,13 @@ test("approved device without paired client stays not_paired even without a vali
       );
 
       assert.equal(response.status, 200);
-      assert.match(body, /Device not paired/);
+      assert.match(body, /Device pending activation/);
       assert.match(body, /Client ID/);
       assert.match(body, new RegExp(clientId));
       assert.match(body, /\/api\/device\/mismatch\/status/);
-      assert.match(body, /const currentAccessState = "not_paired"/);
+      assert.match(body, /const currentClientState = "pending"/);
       assert.match(body, /if \(true\)/);
     });
-
-    const deviceAuth = await readDeviceAuth(deviceCode);
-
-    assert.equal(deviceAuth.lastRejectedIp, undefined);
-    assert.equal(deviceAuth.lastRejectedReason, undefined);
-    assert.equal(deviceAuth.lastRejectedAt, undefined);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -299,7 +293,7 @@ test("revoked device shows distinct revoked state", async () => {
       assert.equal(response.status, 200);
       assert.match(body, /Access revoked/);
       assert.match(body, /This device no longer has access/);
-      assert.match(body, /const currentAccessState = "revoked"/);
+      assert.match(body, /const currentClientState = "revoked"/);
       assert.match(body, /if \(false\)/);
     });
   } finally {
@@ -308,7 +302,7 @@ test("revoked device shows distinct revoked state", async () => {
   }
 });
 
-test("admin reset pairing clears official client assignment and active secret while keeping device approved", async () => {
+test("admin reset pairing clears active assignment but keeps the current security basis", async () => {
   const deviceCode = "resetpair";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -325,17 +319,19 @@ test("admin reset pairing clears official client assignment and active secret wh
       candidateSecretHash: "b".repeat(64),
       clients: [
         {
-          accessState: "authorized",
           clientId: "paired-client",
           isPairedClient: true,
+          lastAuthenticatedAt: "2026-04-12T00:00:00.000Z",
           lastSeenAt: "2026-04-12T00:00:00.000Z",
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "Client/1.0"
         },
         {
-          accessState: "auth_mismatch",
           clientId: "other-client",
           isPairedClient: false,
+          lastAuthenticatedAt: "2026-04-12T00:00:00.000Z",
           lastSeenAt: "2026-04-12T00:00:00.000Z",
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "Other/1.0"
         }
       ],
@@ -367,14 +363,14 @@ test("admin reset pairing clears official client assignment and active secret wh
     const deviceAuth = await readDeviceAuth(deviceCode);
 
     assert.equal(device.status, "approved");
-    assert.equal(deviceAuth.secretHash, undefined);
+    assert.equal(deviceAuth.secretHash, hashDeviceSecret("secret-alpha"));
     assert.equal(deviceAuth.candidateSecretHash, undefined);
     assert.equal(
       deviceAuth.clients.every((client) => client.isPairedClient === false),
       true
     );
     assert.equal(
-      deviceAuth.clients.every((client) => client.accessState === "not_paired"),
+      deviceAuth.clients.every((client) => typeof client.lastAuthenticatedAt === "string"),
       true
     );
   } finally {
@@ -383,7 +379,90 @@ test("admin reset pairing clears official client assignment and active secret wh
   }
 });
 
-test("approved not paired device can authenticate without auto-pairing", async () => {
+test("admin device detail shows Activate again after reset for recent authenticated clients", async () => {
+  const deviceCode = "resetdetail";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date().toISOString();
+  const secretHash = hashDeviceSecret("secret-alpha");
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          clientId: "client-a",
+          isPairedClient: true,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          sessionSecretHash: secretHash,
+          userAgent: "ClientA/1.0"
+        },
+        {
+          clientId: "client-b",
+          isPairedClient: false,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          sessionSecretHash: secretHash,
+          userAgent: "ClientB/1.0"
+        }
+      ],
+      deviceCode,
+      secretHash,
+      updatedAt: now
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const resetResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/reset-pairing`,
+          {
+            headers: {
+              Cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(resetResponse.status, 302);
+
+        const detailResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}`,
+          {
+            headers: {
+              Cookie: adminCookie
+            }
+          }
+        );
+        const detailHtml = await detailResponse.text();
+        const deviceAuth = await readDeviceAuth(deviceCode);
+
+        assert.equal(detailResponse.status, 200);
+        assert.equal(
+          deviceAuth.clients.every((client) => client.isPairedClient === false),
+          true
+        );
+        assert.match(detailHtml, /No active client\. Device is currently pending\./);
+        assert.match(detailHtml, /value="client-a"/);
+        assert.match(detailHtml, /value="client-b"/);
+        assert.match(detailHtml, />Activate</);
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("pending device can authenticate without auto-activation", async () => {
   const deviceCode = "repair01";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -425,9 +504,11 @@ test("approved not paired device can authenticate without auto-pairing", async (
       });
 
       assert.deepEqual(await statusResponse.json(), {
-        accessState: "not_paired",
+        clientState: "pending",
         authorized: false,
         deviceCode,
+        isAuthenticated: true,
+        isActivatable: true,
         layoutId: null,
         reloadVersion: 0,
         status: "approved"
@@ -437,7 +518,6 @@ test("approved not paired device can authenticate without auto-pairing", async (
       const client = deviceAuth.clients.find((entry) => entry.clientId === clientId);
 
       assert.equal(client.isPairedClient, false);
-      assert.equal(client.accessState, "not_paired");
       assert.match(client.lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
     });
   } finally {
@@ -464,9 +544,6 @@ test("admin device cards show formatted fields and filtered actions", async () =
       deviceCode,
       lastConnectedAt: "2026-04-13T00:00:00.000Z",
       lastKnownIp: "203.0.113.99",
-      lastRejectedAt: "2026-04-12T12:00:00.000Z",
-      lastRejectedIp: "203.0.113.44",
-      lastRejectedReason: "auth_mismatch",
       lastStatusAt: new Date().toISOString(),
       secretHash: hashDeviceSecret("secret-alpha"),
       updatedAt: new Date().toISOString()
@@ -486,10 +563,9 @@ test("admin device cards show formatted fields and filtered actions", async () =
         assert.match(body, /Last access: 13\.04\.2026/);
         assert.match(body, /IP: 203\.0\.113\.99/);
         assert.match(body, /Seen: (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
-        assert.match(body, /Last rejected:\s*12\.04\.2026[\s\S]*IP 203\.0\.113\.44[\s\S]*auth_mismatch/);
         assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
         assert.match(body, /Reload/);
-        assert.match(body, /Reset pairing/);
+        assert.match(body, /Reset activation/);
         assert.match(body, /Revoke/);
         assert.match(body, /Delete/);
       });
@@ -500,7 +576,7 @@ test("admin device cards show formatted fields and filtered actions", async () =
   }
 });
 
-test("admin device detail page shows summary, official paired client, and additional client activity", async () => {
+test("admin device detail page shows summary, official active client, and additional client activity", async () => {
   const deviceCode = "detail01";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -523,7 +599,6 @@ test("admin device detail page shows summary, official paired client, and additi
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "authorized",
           clientId: "client-alpha-1234",
           isPairedClient: true,
           lastAuthenticatedAt: pairedSeenAt,
@@ -532,7 +607,6 @@ test("admin device detail page shows summary, official paired client, and additi
           userAgent: "PairedClient/1.0"
         },
         {
-          accessState: "auth_mismatch",
           clientId: "client-bravo-5678",
           isPairedClient: false,
           lastAuthenticatedAt: additionalSeenAt,
@@ -563,22 +637,23 @@ test("admin device detail page shows summary, official paired client, and additi
         assert.match(body, /North lobby panel/);
         assert.match(body, /Summary/);
         assert.match(body, /Layout: <strong>layout-2<\/strong>/);
-        assert.match(body, /Official Paired Client/);
-        assert.match(body, /paired active client/);
-        assert.match(body, /Access: <strong>authorized<\/strong>/);
+        assert.match(body, /Official Active Client/);
+        assert.match(body, /active client/);
+        assert.match(body, /Client state: <strong>active<\/strong>/);
         assert.match(body, /Seen: <strong>Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)<\/strong>/);
         assert.match(body, new RegExp(`Seen at: <strong>${lastStatusAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/strong>`));
         assert.match(body, new RegExp(`Last access: ${lastConnectedAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
         assert.match(body, /PairedClient\/1\.0/);
         assert.match(body, /203\.0\.113\.7/);
-        assert.match(body, /Additional Unpaired Client Activity/);
+        assert.match(body, /Additional Pending \/ Blocked Client Activity/);
         assert.match(body, /client-b\.\.\./);
-        assert.match(body, /auth_mismatch/);
+        assert.match(body, /Client state: <strong>blocked<\/strong>/);
         assert.match(body, new RegExp(additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
         assert.match(body, /SpareBrowser\/2\.0/);
         assert.match(body, new RegExp(`Authenticated: ${additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-        assert.match(body, /name="clientId" value="client-bravo-5678"/);
+        assert.doesNotMatch(body, /name="clientId" value="client-bravo-5678"/);
         assert.doesNotMatch(body, /name="clientId" value="client-alpha-1234"/);
+        assert.match(body, /Authenticate this browser first and keep it active before activating it\./);
       });
     });
   } finally {
@@ -587,7 +662,7 @@ test("admin device detail page shows summary, official paired client, and additi
   }
 });
 
-test("admin device detail page shows no paired client empty state after reset", async () => {
+test("admin device detail page shows no active client empty state after reset", async () => {
   const deviceCode = "detail02";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -604,14 +679,12 @@ test("admin device detail page shows no paired client empty state after reset", 
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "authorized",
           clientId: "client-a",
           isPairedClient: true,
           lastSeenAt: "2026-04-13T10:00:00.000Z",
           userAgent: "BrowserA/1.0"
         },
         {
-          accessState: "auth_mismatch",
           clientId: "client-b",
           isPairedClient: false,
           lastSeenAt: "2026-04-13T10:05:00.000Z",
@@ -656,8 +729,8 @@ test("admin device detail page shows no paired client empty state after reset", 
         const detailBody = await detailResponse.text();
 
         assert.equal(detailResponse.status, 200);
-        assert.match(detailBody, /No paired client\. Device is currently not paired\./);
-        assert.doesNotMatch(detailBody, /Access: <strong>authorized<\/strong>/);
+        assert.match(detailBody, /No active client\. Device is currently pending\./);
+        assert.doesNotMatch(detailBody, /Client state: <strong>active<\/strong>/);
       });
     });
   } finally {
@@ -666,7 +739,7 @@ test("admin device detail page shows no paired client empty state after reset", 
   }
 });
 
-test("admin device detail pair action selects the requested client and updates the detail view", async () => {
+test("admin device detail activate action selects the requested client and updates the detail view", async () => {
   const deviceCode = "detail03";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -683,23 +756,23 @@ test("admin device detail pair action selects the requested client and updates t
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "authorized",
           clientId: "client-a",
-          isPairedClient: true,
+          isPairedClient: false,
+          lastAuthenticatedAt: now,
           lastSeenAt: now,
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "BrowserA/1.0"
         },
         {
-          accessState: "not_paired",
           clientId: "client-b",
           isPairedClient: false,
           lastAuthenticatedAt: now,
           lastSeenAt: now,
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "BrowserB/1.0"
         }
       ],
       deviceCode,
-      lastStatusAt: now,
       secretHash: hashDeviceSecret("secret-alpha"),
       updatedAt: now
     });
@@ -708,7 +781,7 @@ test("admin device detail pair action selects the requested client and updates t
       await withServer(async (baseUrl) => {
         const adminCookie = await loginAsAdmin(baseUrl);
         const pairResponse = await fetch(
-          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+          `${baseUrl}/admin/devices/${deviceCode}/activate-client`,
           {
             body: new URLSearchParams({
               clientId: "client-b"
@@ -733,10 +806,10 @@ test("admin device detail pair action selects the requested client and updates t
         const body = await detailResponse.text();
 
         assert.equal(detailResponse.status, 200);
-        assert.match(body, /Official Paired Client/);
+        assert.match(body, /Official Active Client/);
         assert.match(body, /BrowserB\/1\.0/);
-        assert.match(body, /Access: <strong>authorized<\/strong>/);
-        assert.match(body, /Authenticate this browser first before pairing it\./);
+        assert.match(body, /Client state: <strong>active<\/strong>/);
+        assert.match(body, /Authenticate this browser first and keep it active before activating it\./);
         assert.doesNotMatch(body, /name="clientId" value="client-b"/);
       });
     });
@@ -748,9 +821,7 @@ test("admin device detail pair action selects the requested client and updates t
 
     assert.equal(pairedClients.length, 1);
     assert.equal(clientB.isPairedClient, true);
-    assert.equal(clientB.accessState, "authorized");
     assert.equal(clientA.isPairedClient, false);
-    assert.equal(clientA.accessState, "not_paired");
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -899,9 +970,11 @@ test("device status endpoint returns unknown for missing devices", async () => {
 
     assert.equal(response.status, 404);
     assert.deepEqual(payload, {
-      accessState: "unknown",
+      clientState: "unknown",
       authorized: false,
       deviceCode,
+      isAuthenticated: false,
+      isActivatable: false,
       layoutId: null,
       reloadVersion: 0,
       status: "unknown"
@@ -909,7 +982,7 @@ test("device status endpoint returns unknown for missing devices", async () => {
   });
 });
 
-test("device status endpoint returns pending and revoked for non-approved devices", async () => {
+test("device status endpoint returns pending and revoked for non-active devices", async () => {
   const pendingCode = "statuspd";
   const revokedCode = "statusrv";
   const pendingFilePath = path.join(devicesDir, `${pendingCode}.json`);
@@ -939,17 +1012,21 @@ test("device status endpoint returns pending and revoked for non-approved device
       );
 
       assert.deepEqual(await pendingResponse.json(), {
-        accessState: "pending",
+        clientState: "pending",
         authorized: false,
         deviceCode: pendingCode,
+        isAuthenticated: false,
+        isActivatable: false,
         layoutId: "layout-1",
         reloadVersion: 0,
         status: "pending"
       });
       assert.deepEqual(await revokedResponse.json(), {
-        accessState: "revoked",
+        clientState: "revoked",
         authorized: false,
         deviceCode: revokedCode,
+        isAuthenticated: false,
+        isActivatable: false,
         layoutId: "layout-2",
         reloadVersion: 0,
         status: "revoked"
@@ -961,7 +1038,7 @@ test("device status endpoint returns pending and revoked for non-approved device
   }
 });
 
-test("device status endpoint reports authorization and layout for approved devices", async () => {
+test("device status endpoint reports activation eligibility and layout gating for approved devices", async () => {
   const deviceCode = "statusok1";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -987,9 +1064,11 @@ test("device status endpoint reports authorization and layout for approved devic
       );
 
       assert.deepEqual(await unauthorizedResponse.json(), {
-        accessState: "not_paired",
+        clientState: "pending",
         authorized: false,
         deviceCode,
+        isAuthenticated: false,
+        isActivatable: false,
         layoutId: "layout-2",
         reloadVersion: 0,
         status: "approved"
@@ -1020,9 +1099,11 @@ test("device status endpoint reports authorization and layout for approved devic
       );
 
       assert.deepEqual(await authorizedResponse.json(), {
-        accessState: "not_paired",
+        clientState: "pending",
         authorized: false,
         deviceCode,
+        isAuthenticated: true,
+        isActivatable: true,
         layoutId: "layout-2",
         reloadVersion: 0,
         status: "approved"
@@ -1034,7 +1115,7 @@ test("device status endpoint reports authorization and layout for approved devic
   }
 });
 
-test("paired active client status polling updates official heartbeat and client activity", async () => {
+test("active client status polling updates official heartbeat and client activity", async () => {
   const deviceCode = "heartbt1";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1067,7 +1148,7 @@ test("paired active client status polling updates official heartbeat and client 
 
       assert.equal(authResponse.status, 200);
 
-      await pairDeviceToClient(deviceCode, clientId);
+      await activateDeviceClient(deviceCode, clientId);
 
       const statusResponse = await fetch(
         `${baseUrl}/api/device/${deviceCode}/status`,
@@ -1080,14 +1161,15 @@ test("paired active client status polling updates official heartbeat and client 
       );
 
       assert.equal(statusResponse.status, 200);
-      assert.equal((await statusResponse.json()).accessState, "authorized");
+      const payload = await statusResponse.json();
+      assert.equal(payload.clientState, "active");
+      assert.equal(payload.authorized, true);
     });
 
     const deviceAuth = await readDeviceAuth(deviceCode);
     const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
 
     assert.equal(pairedClients.length, 1);
-    assert.equal(pairedClients[0].accessState, "authorized");
     assert.equal(pairedClients[0].userAgent, "HeartbeatClient/1.0");
     assert.match(pairedClients[0].lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.match(deviceAuth.lastStatusAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1097,7 +1179,7 @@ test("paired active client status polling updates official heartbeat and client 
   }
 });
 
-test("additional unpaired client activity updates only its own client lastSeenAt", async () => {
+test("additional blocked client activity updates only its own client lastSeenAt", async () => {
   const deviceCode = "heartbt2";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1128,7 +1210,7 @@ test("additional unpaired client activity updates only its own client lastSeenAt
         getCookiePair(authResponse, "mydashmaster_device_client")
       );
 
-      await pairDeviceToClient(deviceCode, pairedClientId);
+      await activateDeviceClient(deviceCode, pairedClientId);
 
       await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
         headers: {
@@ -1150,7 +1232,8 @@ test("additional unpaired client activity updates only its own client lastSeenAt
       );
       const mismatchPayload = await mismatchResponse.json();
 
-      assert.equal(mismatchPayload.accessState, "auth_mismatch");
+      assert.equal(mismatchPayload.clientState, "blocked");
+      assert.equal(mismatchPayload.authorized, false);
 
       const afterMismatch = await readDeviceAuth(deviceCode);
       const pairedClients = afterMismatch.clients.filter((client) => client.isPairedClient);
@@ -1161,7 +1244,6 @@ test("additional unpaired client activity updates only its own client lastSeenAt
       assert.equal(afterMismatch.lastStatusAt, officialHeartbeat);
       assert.equal(pairedClients.length, 1);
       assert.equal(pairedClients[0].userAgent, "PairedClient/1.0");
-      assert.equal(mismatchClient.accessState, "auth_mismatch");
       assert.equal(mismatchClient.isPairedClient, false);
       assert.match(mismatchClient.lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
     });
@@ -1198,7 +1280,6 @@ test("client activity stores lastKnownIp per client on status polling", async ()
     const deviceAuth = await readDeviceAuth(deviceCode);
 
     assert.equal(deviceAuth.clients.length, 1);
-    assert.equal(deviceAuth.clients[0].accessState, "pending");
     assert.equal(deviceAuth.clients[0].lastKnownIp, "203.0.113.77");
   } finally {
     await removeIfExists(deviceFilePath);
@@ -1206,7 +1287,7 @@ test("client activity stores lastKnownIp per client on status polling", async ()
   }
 });
 
-test("subsequent auth does not replace the paired client without explicit selection", async () => {
+test("subsequent auth does not replace the active client without explicit selection", async () => {
   const deviceCode = "heartbt3";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1231,7 +1312,7 @@ test("subsequent auth does not replace the paired client without explicit select
       });
 
       assert.equal(firstAuthResponse.status, 200);
-      await pairDeviceToClient(
+      await activateDeviceClient(
         deviceCode,
         getCookieValue(getCookiePair(firstAuthResponse, "mydashmaster_device_client"))
       );
@@ -1261,7 +1342,9 @@ test("subsequent auth does not replace the paired client without explicit select
         }
       );
 
-      assert.equal((await secondStatusResponse.json()).accessState, "auth_mismatch");
+      const secondPayload = await secondStatusResponse.json();
+      assert.equal(secondPayload.clientState, "blocked");
+      assert.equal(secondPayload.authorized, false);
     });
 
     const deviceAuth = await readDeviceAuth(deviceCode);
@@ -1272,7 +1355,6 @@ test("subsequent auth does not replace the paired client without explicit select
     assert.equal(pairedClients.length, 1);
     assert.equal(firstClient.isPairedClient, true);
     assert.equal(secondClient.isPairedClient, false);
-    assert.equal(secondClient.accessState, "auth_mismatch");
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -1336,7 +1418,6 @@ test("status polling after reset updates client activity but not official heartb
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "not_paired",
           clientId: "reset-client",
           isPairedClient: false,
           lastSeenAt: oldHeartbeat,
@@ -1371,14 +1452,15 @@ test("status polling after reset updates client activity but not official heartb
       });
       const payload = await statusResponse.json();
 
-      assert.equal(payload.accessState, "not_paired");
+      assert.equal(payload.clientState, "pending");
       assert.equal(payload.authorized, false);
+      assert.equal(payload.isAuthenticated, true);
+      assert.equal(payload.isActivatable, true);
     });
 
     const deviceAuth = await readDeviceAuth(deviceCode);
 
     assert.equal(deviceAuth.lastStatusAt, oldHeartbeat);
-    assert.equal(deviceAuth.clients[0].accessState, "not_paired");
     assert.match(deviceAuth.clients[0].lastSeenAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     await removeIfExists(deviceFilePath);
@@ -1386,7 +1468,7 @@ test("status polling after reset updates client activity but not official heartb
   }
 });
 
-test("fresh browser after reset can authenticate, stays not paired, and becomes official only after admin pairing", async () => {
+test("fresh browser after reset can authenticate, stays pending, and becomes official only after admin activation", async () => {
   const deviceCode = "resetflow";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1443,7 +1525,7 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
       const browserTwoClientId = getCookieValue(browserTwoClientCookie);
 
       assert.equal(browserTwoPage.status, 200);
-      assert.match(browserTwoPageBody, /Device not paired/);
+      assert.match(browserTwoPageBody, /Device pending activation/);
       assert.match(browserTwoPageBody, /Client ID/);
       assert.match(browserTwoPageBody, new RegExp(browserTwoClientId));
       assert.match(browserTwoPageBody, /if \(true\)/);
@@ -1474,7 +1556,6 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
       );
 
       assert.equal(browserTwoClientAfterAuth.isPairedClient, false);
-      assert.equal(browserTwoClientAfterAuth.accessState, "not_paired");
       assert.match(browserTwoClientAfterAuth.lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
 
       const browserTwoStatusBeforePair = await fetch(
@@ -1488,15 +1569,17 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
       );
       const browserTwoStatusBeforePairPayload = await browserTwoStatusBeforePair.json();
 
-      assert.equal(browserTwoStatusBeforePairPayload.accessState, "not_paired");
+      assert.equal(browserTwoStatusBeforePairPayload.clientState, "pending");
       assert.equal(browserTwoStatusBeforePairPayload.authorized, false);
+      assert.equal(browserTwoStatusBeforePairPayload.isAuthenticated, true);
+      assert.equal(browserTwoStatusBeforePairPayload.isActivatable, true);
 
       const heartbeatBeforePair = (await readDeviceAuth(deviceCode)).lastStatusAt || null;
 
       await withAdminEnv(async () => {
         const adminCookie = await loginAsAdmin(baseUrl);
         const pairResponse = await fetch(
-          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+          `${baseUrl}/admin/devices/${deviceCode}/activate-client`,
           {
             body: new URLSearchParams({
               clientId: browserTwoClientId
@@ -1524,7 +1607,7 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
       );
       const browserTwoStatusAfterPairPayload = await browserTwoStatusAfterPair.json();
 
-      assert.equal(browserTwoStatusAfterPairPayload.accessState, "authorized");
+      assert.equal(browserTwoStatusAfterPairPayload.clientState, "active");
       assert.equal(browserTwoStatusAfterPairPayload.authorized, true);
 
       const browserOneStatusAfterPair = await fetch(
@@ -1538,7 +1621,7 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
       );
       const browserOneStatusAfterPairPayload = await browserOneStatusAfterPair.json();
 
-      assert.equal(browserOneStatusAfterPairPayload.accessState, "auth_mismatch");
+      assert.equal(browserOneStatusAfterPairPayload.clientState, "blocked");
       assert.equal(browserOneStatusAfterPairPayload.authorized, false);
 
       const deviceAuthAfterPair = await readDeviceAuth(deviceCode);
@@ -1553,7 +1636,7 @@ test("fresh browser after reset can authenticate, stays not paired, and becomes 
   }
 });
 
-test("reset clears stale authenticated session evidence so an old browser cannot be paired without reauth", async () => {
+test("reset keeps current-cycle authentication so a recently seen client can be activated again", async () => {
   const deviceCode = "stalepair";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1601,7 +1684,8 @@ test("reset clears stale authenticated session evidence so an old browser cannot
         (client) => client.clientId === browserOneClientId
       );
 
-      assert.equal(browserOneAfterReset.lastAuthenticatedAt, undefined);
+      assert.match(browserOneAfterReset.lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
+      assert.equal(browserOneAfterReset.sessionSecretHash, hashDeviceSecret("secret-alpha"));
 
       const browserTwoPage = await fetch(`${baseUrl}/d/${deviceCode}`, {
         headers: {
@@ -1624,11 +1708,12 @@ test("reset clears stale authenticated session evidence so an old browser cannot
       });
 
       assert.equal(browserTwoAuth.status, 200);
+      assert.deepEqual(await browserTwoAuth.json(), { status: "approved" });
 
       await withAdminEnv(async () => {
         const adminCookie = await loginAsAdmin(baseUrl);
-        const pairResponse = await fetch(
-          `${baseUrl}/admin/devices/${deviceCode}/pair-client`,
+        const activateResponse = await fetch(
+          `${baseUrl}/admin/devices/${deviceCode}/activate-client`,
           {
             body: new URLSearchParams({
               clientId: browserOneClientId
@@ -1637,14 +1722,17 @@ test("reset clears stale authenticated session evidence so an old browser cannot
               Cookie: adminCookie,
               "Content-Type": "application/x-www-form-urlencoded"
             },
-            method: "POST"
+            method: "POST",
+            redirect: "manual"
           }
         );
-        const pairBody = await pairResponse.text();
-
-        assert.equal(pairResponse.status, 400);
-        assert.match(pairBody, /has not established an authenticated browser session/);
+        assert.equal(activateResponse.status, 302);
       });
+
+      const finalDeviceAuth = await readDeviceAuth(deviceCode);
+      const activeClient = finalDeviceAuth.clients.find((client) => client.isPairedClient);
+
+      assert.equal(activeClient.clientId, browserOneClientId);
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -1652,7 +1740,7 @@ test("reset clears stale authenticated session evidence so an old browser cannot
   }
 });
 
-test("former paired client polling after reset clears stale paired flag without advancing heartbeat", async () => {
+test("former active client stays pending after reset and does not advance heartbeat until re-activated", async () => {
   const deviceCode = "resetstl";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1715,15 +1803,16 @@ test("former paired client polling after reset clears stale paired flag without 
       });
       const statusPayload = await statusResponse.json();
 
-      assert.equal(statusPayload.accessState, "not_paired");
+      assert.equal(statusPayload.clientState, "pending");
       assert.equal(statusPayload.authorized, false);
+      assert.equal(statusPayload.isAuthenticated, true);
+      assert.equal(statusPayload.isActivatable, true);
 
       const deviceAuth = await readDeviceAuth(deviceCode);
       const originalClient = deviceAuth.clients.find((client) => client.clientId === firstClientId);
 
       assert.equal(deviceAuth.lastStatusAt, oldHeartbeat);
       assert.equal(originalClient.isPairedClient, false);
-      assert.equal(originalClient.accessState, "not_paired");
     });
   } finally {
     await removeIfExists(deviceFilePath);
@@ -1731,7 +1820,7 @@ test("former paired client polling after reset clears stale paired flag without 
   }
 });
 
-test("pairDeviceToClient selects exactly one official client", async () => {
+test("activateDeviceClient selects exactly one official active client", async () => {
   const deviceCode = "pairclnt";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1748,19 +1837,19 @@ test("pairDeviceToClient selects exactly one official client", async () => {
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "not_paired",
           clientId: "client-a",
           isPairedClient: false,
           lastAuthenticatedAt: now,
           lastSeenAt: now,
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "ClientA/1.0"
         },
         {
-          accessState: "not_paired",
           clientId: "client-b",
           isPairedClient: false,
           lastAuthenticatedAt: now,
           lastSeenAt: now,
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
           userAgent: "ClientB/1.0"
         }
       ],
@@ -1769,7 +1858,7 @@ test("pairDeviceToClient selects exactly one official client", async () => {
       updatedAt: now
     });
 
-    await pairDeviceToClient(deviceCode, "client-b");
+    await activateDeviceClient(deviceCode, "client-b");
 
     const deviceAuth = await readDeviceAuth(deviceCode);
     const pairedClients = deviceAuth.clients.filter((client) => client.isPairedClient);
@@ -1778,45 +1867,14 @@ test("pairDeviceToClient selects exactly one official client", async () => {
 
     assert.equal(pairedClients.length, 1);
     assert.equal(clientB.isPairedClient, true);
-    assert.equal(clientB.accessState, "authorized");
     assert.equal(clientA.isPairedClient, false);
-    assert.equal(clientA.accessState, "not_paired");
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
   }
 });
 
-test("device auth validation rejects authorized clients without a paired client", async () => {
-  const deviceCode = "badpair1";
-  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
-  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
-
-  await removeIfExists(deviceFilePath);
-  await removeIfExists(deviceAuthFilePath);
-
-  try {
-    await assert.rejects(
-      updateDeviceAuth(deviceCode, {
-        clients: [
-          {
-            accessState: "authorized",
-            clientId: "client-a",
-            isPairedClient: false
-          }
-        ],
-        deviceCode,
-        secretHash: hashDeviceSecret("secret-alpha")
-      }),
-      /authorized client requires one isPairedClient=true entry/
-    );
-  } finally {
-    await removeIfExists(deviceFilePath);
-    await removeIfExists(deviceAuthFilePath);
-  }
-});
-
-test("device auth validation rejects multiple paired clients", async () => {
+test("device auth validation rejects multiple active clients", async () => {
   const deviceCode = "badpair2";
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
 
@@ -1827,12 +1885,10 @@ test("device auth validation rejects multiple paired clients", async () => {
       updateDeviceAuth(deviceCode, {
         clients: [
           {
-            accessState: "authorized",
             clientId: "client-a",
             isPairedClient: true
           },
           {
-            accessState: "authorized",
             clientId: "client-b",
             isPairedClient: true
           }
@@ -1864,7 +1920,6 @@ test("stale client activity older than 48 hours is cleaned up during status poll
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "pending",
           clientId: "stale-client",
           isPairedClient: false,
           lastSeenAt: staleSeenAt,
@@ -1893,7 +1948,7 @@ test("stale client activity older than 48 hours is cleaned up during status poll
   }
 });
 
-test("admin overview Seen uses official heartbeat instead of unpaired client activity", async () => {
+test("admin overview Seen uses official heartbeat instead of non-active client activity", async () => {
   const deviceCode = "heartbt6";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1911,14 +1966,12 @@ test("admin overview Seen uses official heartbeat instead of unpaired client act
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "authorized",
           clientId: "paired-client",
           isPairedClient: true,
           lastSeenAt: threeMinutesAgo,
           userAgent: "PairedClient/1.0"
         },
         {
-          accessState: "auth_mismatch",
           clientId: "other-client",
           isPairedClient: false,
           lastSeenAt: now,
@@ -2017,7 +2070,7 @@ test("authorized layout fragment request returns attributed layout markup", asyn
         "mydashmaster_device",
         "mydashmaster_device_client"
       ]);
-      await pairDeviceToClient(
+      await activateDeviceClient(
         deviceCode,
         getCookieValue(getCookiePair(authResponse, "mydashmaster_device_client"))
       );
@@ -2190,7 +2243,11 @@ test("known pending device auth stores last connection metadata", async () => {
 
     assert.equal(deviceAuth.lastKnownIp, "203.0.113.7");
     assert.match(deviceAuth.lastConnectedAt, /^\d{4}-\d{2}-\d{2}T/);
-    assert.match(deviceAuth.candidateSecretHash, /^[a-f0-9]{64}$/);
+    const authenticatedClients = deviceAuth.clients || [];
+    assert.equal(authenticatedClients.length, 1);
+    assert.match(authenticatedClients[0].lastAuthenticatedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(authenticatedClients[0].sessionSecretHash, /^[a-f0-9]{64}$/);
+    assert.equal(deviceAuth.candidateSecretHash, undefined);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
@@ -2264,7 +2321,7 @@ test("successful authorized device page access updates activity metadata", async
         "mydashmaster_device",
         "mydashmaster_device_client"
       ]);
-      await pairDeviceToClient(
+      await activateDeviceClient(
         deviceCode,
         getCookieValue(getCookiePair(authResponse, "mydashmaster_device_client"))
       );
@@ -2288,7 +2345,7 @@ test("successful authorized device page access updates activity metadata", async
       assert.match(pageBody, /let isUpdatingLayout = false/);
       assert.match(pageBody, /let latestExpectedLayoutId = currentState\.layoutId/);
       assert.match(pageBody, /await updateLayoutFragment\(payload\.layoutId\)/);
-      assert.match(pageBody, /payload\.accessState !== "authorized"/);
+      assert.match(pageBody, /payload\.clientState !== "active"/);
       assert.match(pageBody, /payload\.reloadVersion !== currentState\.reloadVersion/);
       assert.match(pageBody, /requestedLayoutId !== latestExpectedLayoutId/);
       assert.match(pageBody, /fragmentLayoutId !== latestExpectedLayoutId/);
@@ -2325,7 +2382,6 @@ test("failed device page access does not update activity metadata", async () => 
     await updateDeviceAuth(deviceCode, {
       clients: [
         {
-          accessState: "authorized",
           clientId: "paired-client",
           isPairedClient: true,
           lastAuthenticatedAt: "2026-04-12T00:00:00.000Z",
@@ -2355,9 +2411,6 @@ test("failed device page access does not update activity metadata", async () => 
 
     assert.equal(deviceAuth.lastKnownIp, "198.51.100.30");
     assert.equal(deviceAuth.lastConnectedAt, "2026-04-12T00:00:00.000Z");
-    assert.equal(deviceAuth.lastRejectedIp, "198.51.100.40");
-    assert.equal(deviceAuth.lastRejectedReason, "auth_mismatch");
-    assert.match(deviceAuth.lastRejectedAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);

@@ -1,5 +1,6 @@
 const express = require("express");
 
+const { deriveClientState } = require("../device/client-state");
 const { buildDeviceLayoutViewModel } = require("../device/layout-render");
 const {
   clearDeviceSessionCookie,
@@ -14,9 +15,7 @@ const {
   recordDeviceClientActivity,
   recordDeviceActivity,
   readDevice,
-  readDeviceAuth,
-  registerCandidateSecret,
-  updateDeviceAuth
+  readDeviceAuth
 } = require("../storage/json-store");
 
 const router = express.Router();
@@ -29,15 +28,14 @@ function getRequestUserAgent(req) {
 
 function buildStatusPayload(req, deviceCode, device, deviceAuth, clientId) {
   const reloadVersion = deviceAuth?.reloadVersion || 0;
-  const pairedClient = Array.isArray(deviceAuth?.clients)
-    ? deviceAuth.clients.find((client) => client.isPairedClient) || null
-    : null;
 
   if (!device) {
     return {
-      accessState: "unknown",
+      clientState: "unknown",
       authorized: false,
       deviceCode,
+      isAuthenticated: false,
+      isActivatable: false,
       layoutId: null,
       reloadVersion,
       status: "unknown"
@@ -46,60 +44,37 @@ function buildStatusPayload(req, deviceCode, device, deviceAuth, clientId) {
 
   if (device.status === "revoked") {
     return {
-      accessState: "revoked",
+      clientState: "revoked",
       authorized: false,
       deviceCode,
+      isAuthenticated: false,
+      isActivatable: false,
       layoutId: device.layoutId || null,
       reloadVersion,
       status: "revoked"
     };
   }
 
-  if (device.status !== "approved") {
-    return {
-      accessState: "pending",
-      authorized: false,
-      deviceCode,
-      layoutId: device.layoutId || null,
-      reloadVersion,
-      status: device.status
-    };
-  }
-
-  if (!deviceAuth?.secretHash) {
-    return {
-      accessState: "not_paired",
-      authorized: false,
-      deviceCode,
-      layoutId: device.layoutId || null,
-      reloadVersion,
-      status: "approved"
-    };
-  }
-
-  const authorized = hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash);
-
-  if (!pairedClient) {
-    return {
-      accessState: "not_paired",
-      authorized: false,
-      deviceCode,
-      layoutId: device.layoutId || null,
-      reloadVersion,
-      status: "approved"
-    };
-  }
-
-  const isPairedClient =
-    authorized && pairedClient.clientId === clientId;
+  const derivedState = deriveClientState({
+    clientId,
+    device,
+    deviceAuth
+  });
+  const authorized =
+    device.status === "approved" &&
+    derivedState.state === "active" &&
+    Boolean(deviceAuth?.secretHash) &&
+    hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash);
 
   return {
-    accessState: isPairedClient ? "authorized" : "auth_mismatch",
-    authorized: isPairedClient,
+    clientState: derivedState.state,
+    authorized,
     deviceCode,
+    isAuthenticated: derivedState.isAuthenticated,
+    isActivatable: derivedState.isActivatable,
     layoutId: device.layoutId || null,
     reloadVersion,
-    status: "approved"
+    status: device.status
   };
 }
 
@@ -120,7 +95,9 @@ router.get("/:deviceCode/status", async (req, res, next) => {
     await recordDeviceClientActivity(
       deviceCode,
       clientId,
-      payload.accessState,
+      {
+        isOfficialHeartbeat: payload.authorized === true
+      },
       getRequestUserAgent(req),
       getRequestIp(req)
     );
@@ -145,7 +122,7 @@ router.get("/:deviceCode/layout-fragment", async (req, res, next) => {
       return res.status(404).send("Unknown device");
     }
 
-    if (payload.accessState !== "authorized") {
+    if (payload.authorized !== true || payload.clientState !== "active") {
       clearDeviceSessionCookie(req, res, deviceCode);
       return res.status(403).send("Not authorized");
     }
@@ -180,60 +157,35 @@ router.post("/:deviceCode/auth", async (req, res, next) => {
     const secretHash = hashDeviceSecret(deviceSecret);
     const requestIp = getRequestIp(req);
 
-    if (device.status === "pending" || device.status === "revoked") {
-      await registerCandidateSecret(deviceCode, secretHash);
-      await recordDeviceActivity(deviceCode, requestIp);
+    if (device.status === "revoked") {
       clearDeviceSessionCookie(req, res, deviceCode);
-      return res.json({ status: "pending" });
+      return res.json({ status: "revoked" });
     }
 
     const deviceAuth = await readDeviceAuth(deviceCode);
 
-    if (!deviceAuth?.secretHash) {
-      await updateDeviceAuth(deviceCode, {
-        ...deviceAuth,
-        candidateSecretHash: undefined,
-        secretHash,
-        updatedAt: new Date().toISOString()
-      });
-      await recordAuthenticatedClientSession(
-        deviceCode,
-        clientId,
-        "not_paired",
-        getRequestUserAgent(req),
-        requestIp
-      );
-      await recordDeviceActivity(deviceCode, requestIp);
-      setDeviceSessionCookie(req, res, deviceCode, secretHash);
-
-      return res.json({ status: "approved" });
-    }
-
-    if (deviceAuth.secretHash !== secretHash) {
+    if (deviceAuth?.secretHash && deviceAuth.secretHash !== secretHash) {
       clearDeviceSessionCookie(req, res, deviceCode);
       return res.status(401).json({ status: "unauthorized" });
     }
-    const pairedClient = Array.isArray(deviceAuth.clients)
-      ? deviceAuth.clients.find((client) => client.isPairedClient) || null
-      : null;
-    const accessState = pairedClient
-      ? pairedClient.clientId === clientId
-        ? "authorized"
-        : "auth_mismatch"
-      : "not_paired";
 
     await recordAuthenticatedClientSession(
       deviceCode,
       clientId,
-      accessState,
+      secretHash,
       getRequestUserAgent(req),
       requestIp
     );
 
     await recordDeviceActivity(deviceCode, requestIp);
-    setDeviceSessionCookie(req, res, deviceCode, deviceAuth.secretHash);
+    setDeviceSessionCookie(
+      req,
+      res,
+      deviceCode,
+      deviceAuth?.secretHash || secretHash
+    );
 
-    return res.json({ status: "approved" });
+    return res.json({ status: device.status });
   } catch (error) {
     next(error);
   }

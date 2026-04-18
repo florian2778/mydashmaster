@@ -1,5 +1,23 @@
 
-# Device Heartbeat / Client Activity – Spec Update Proposal
+# Device Heartbeat / Client Activity – Merged Note
+
+Diese Zwischen-Spezifikation ist in die Hauptdokumentation übernommen.
+
+Maßgeblich sind jetzt:
+- `docs/device-heartbeat.md`
+- `docs/device-access-lifecycle.md`
+- `docs/data-model.md`
+- `docs/admin_ui_spec.md`
+- `docs/architecture.md`
+
+Das aktuelle sichtbare Client-Modell ist:
+- `pending`
+- `active`
+- `blocked`
+
+Authentication bleibt technische Voraussetzung und ist kein primärer sichtbarer Business-Zustand.
+
+Die restlichen Inhalte in dieser Datei sind historisch und nicht mehr normativ.
 
 ## Ziel
 
@@ -47,7 +65,7 @@ Beispiele:
 - zweiter Browser mit gleicher URL
 - alte Session
 - Testbrowser
-- Browser mit `auth_mismatch`
+- Browser im Zustand `blocked`
 - Browser im `pending`-Zustand
 
 Diese Aktivität darf sichtbar sein, aber nicht als offizieller Device-Zustand zählen.
@@ -111,14 +129,14 @@ Vorschlag:
     {
       "clientId": "abc123",
       "lastSeenAt": "2026-04-15T12:00:20Z",
-      "accessState": "authorized",
+      "isPairedClient": true,
       "isPairedClient": true,
       "userAgent": "Mozilla/5.0 ..."
     },
     {
       "clientId": "xyz789",
       "lastSeenAt": "2026-04-15T12:00:18Z",
-      "accessState": "auth_mismatch",
+      "isPairedClient": false,
       "isPairedClient": false,
       "userAgent": "Mozilla/5.0 ..."
     }
@@ -141,14 +159,12 @@ Vorschlag:
 - rein diagnostisch
 - nicht identisch mit offiziellem Device-Heartbeat
 
-### `accessState`
+### Sichtbarer Client-Zustand
 - aktueller Lifecycle-/Access-Zustand dieses Clients
 - z. B.:
-  - `authorized`
   - `pending`
-  - `auth_mismatch`
-  - `revoked`
-  - `not_paired`
+  - `paired`
+  - `blocked`
 
 ### `isPairedClient`
 - `true` genau für den einen aktuell offiziellen gepairten Client
@@ -169,7 +185,7 @@ Wenn der Status-Request vom aktuell gepairten und autorisierten Client kommt:
 
 - Client-Level:
   - `clients[].lastSeenAt` dieses Clients aktualisieren
-  - `accessState = authorized`
+  - sichtbarer Zustand `paired`
   - `isPairedClient = true`
 - Device-Level:
   - `lastStatusAt` aktualisieren
@@ -186,7 +202,7 @@ Wenn ein weiterer Browser dieselbe URL aufruft:
 
 - Client-Level:
   - `clients[].lastSeenAt` aktualisieren
-  - `accessState` entsprechend setzen
+  - sichtbaren Zustand aus `isPairedClient` und Device-Kontext ableiten
   - `isPairedClient = false`
 - Device-Level:
   - `lastStatusAt` NICHT aktualisieren
@@ -327,7 +343,7 @@ ergänzen:
 - Felder:
   - `clientId`
   - `lastSeenAt`
-  - `accessState`
+  - sichtbarer Client-Zustand
   - `isPairedClient`
   - `userAgent`
 

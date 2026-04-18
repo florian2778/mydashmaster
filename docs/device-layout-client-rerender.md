@@ -28,7 +28,7 @@ The device page should:
 
 In scope:
 
-- layout changes while device remains `authorized`
+- layout changes while device remains on the active authorized page
 - client-side replacement of the layout container
 - continued use of polling
 - server-rendered layout source data
@@ -61,7 +61,7 @@ Impact:
 
 ## Target Behavior
 
-When the device is already on the authorized layout page and polling detects a changed layout identity:
+When the device is already on the active layout page and polling detects a changed layout identity:
 
 1. The page must remain loaded
 2. The client must request the updated layout render payload from the server
@@ -110,9 +110,9 @@ Core rule:
 
 Client-side layout re-render is allowed only when all of the following are true:
 
-- current page is in `authorized` state
+- current page is in visible state `active`
 - status endpoint still returns `authorized = true`
-- returned `accessState = authorized`
+- returned `clientState = active`
 - the current layout identity changed:
   - returned `layoutId` differs from the currently rendered `layoutId`
   - or returned `layoutVersion` differs from the currently rendered `layoutVersion`
@@ -120,8 +120,7 @@ Client-side layout re-render is allowed only when all of the following are true:
 If any of these are not true, the device must fall back to the existing lifecycle behavior:
 
 - `pending` -> waiting page
-- `not_paired` -> waiting page
-- `auth_mismatch` -> waiting page
+- `blocked` -> waiting page
 - `revoked` -> revoked page
 - `unknown` -> unknown page
 
@@ -130,7 +129,7 @@ In those cases, a full page reload or redirect remains acceptable and preferred.
 This aligns with the existing lifecycle model:
 
 - waiting-state transitions remain server-rendered
-- only `authorized -> authorized` layout changes may stay on the current page
+- only `active -> active` layout changes may stay on the current page
 
 ---
 
@@ -149,7 +148,7 @@ The status payload continues to provide:
 - `layoutId`
 - `layoutVersion`
 - `authorized`
-- `accessState`
+- `clientState`
 
 ### Migration Safety
 
@@ -260,7 +259,7 @@ Behavior:
 - requires the same device authorization rules as the main device page
 - must verify matching `deviceCode`
 - must verify a valid current device session
-- must verify `accessState = authorized`
+- must verify `clientState = active`
 - returns only the rendered layout container markup
 - must not expose secret material
 - must return non-success if device is no longer authorized
@@ -362,7 +361,7 @@ Requirements:
 
 Only this case should use client-side re-render:
 
-- `authorized` -> `authorized` with changed layout identity:
+- `active` -> `active` with changed layout identity:
   - different `layoutId`
   - or same `layoutId` with different `layoutVersion`
 
@@ -376,11 +375,10 @@ Recommended behavior:
 
 ### Cases that should still use full reload
 
-- `authorized` -> `pending`
-- `authorized` -> `not_paired`
-- `authorized` -> `auth_mismatch`
-- `authorized` -> `revoked`
-- `authorized` -> `unknown`
+- `active` -> `pending`
+- `active` -> `blocked`
+- `active` -> `revoked`
+- `active` -> `unknown`
 
 Reason:
 
@@ -401,8 +399,8 @@ The distinction between update types must remain explicit.
 
 ### Normal case
 
-- device is currently `authorized`
-- status polling returns `accessState = authorized`
+- device is currently `active`
+- status polling returns `clientState = active`
 - `layoutId` changes
 - client performs layout fragment replacement only
 
@@ -414,7 +412,7 @@ The distinction between update types must remain explicit.
 
 ### Lifecycle case
 
-- accessState changes away from `authorized`
+- visible client state changes away from `active`
 - client performs a full page reload
 - server renders the correct lifecycle state page
 

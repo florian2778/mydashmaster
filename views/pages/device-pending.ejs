@@ -10,11 +10,14 @@
     <main class="pending-wrap">
       <p>Device</p>
       <p><code><%= deviceCode %></code></p>
-      <% if (accessState === "not_paired" && clientId) { %>
+      <% if (clientState === "pending" && clientId) { %>
         <p>Client ID</p>
         <p><code><%= clientId %></code></p>
       <% } %>
       <p><%= message %></p>
+      <% if (clientState === "pending" && isActivatable) { %>
+        <p class="pending-note">This browser is eligible for activation once the admin selects it.</p>
+      <% } %>
       <% if (note) { %>
         <p class="pending-note"><%= note %></p>
       <% } %>
@@ -22,7 +25,7 @@
     <% if (shouldPoll) { %>
       <script>
         (async () => {
-          const currentAccessState = <%- JSON.stringify(accessState) %>;
+          const currentClientState = <%- JSON.stringify(clientState) %>;
           const storageKey = "mydashmaster-device-secret";
           const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
           let isChecking = false;
@@ -81,32 +84,28 @@
                 const deviceSecret = getDeviceSecret();
                 const authPayload = await requestBootstrap(deviceSecret);
 
-                if (authPayload.status === "approved" && currentAccessState === "pending") {
-                  window.location.reload();
-                  return;
-                }
               }
 
               const statusPayload = await requestStatus();
 
-              if (!statusPayload || typeof statusPayload.accessState !== "string") {
+              if (!statusPayload || typeof statusPayload.clientState !== "string") {
                 return;
               }
 
-              if (statusPayload.accessState === "authorized") {
+              if (statusPayload.clientState === "active" && statusPayload.authorized === true) {
                 window.location.reload();
                 return;
               }
 
               if (
-                statusPayload.accessState === "revoked" ||
-                statusPayload.accessState === "unknown"
+                statusPayload.clientState === "revoked" ||
+                statusPayload.clientState === "unknown"
               ) {
                 window.location.reload();
                 return;
               }
 
-              if (statusPayload.accessState !== currentAccessState) {
+              if (statusPayload.clientState !== currentClientState) {
                 window.location.reload();
               }
             } catch (error) {

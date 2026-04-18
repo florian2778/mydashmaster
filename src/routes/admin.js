@@ -1,5 +1,6 @@
 const express = require("express");
 
+const { deriveClientState, getPairedClient } = require("../device/client-state");
 const {
   clearAdminSessionCookie,
   hasAdminAuthConfig,
@@ -13,13 +14,13 @@ const {
   summarizePreviewTree
 } = require("../admin/layout-preview");
 const {
-  activateCandidateSecret,
+  activateDeviceClient,
   createAdminDevice,
   deleteDevice,
   listDevices,
   listLayouts,
-  pairDeviceToClient,
   readDevice,
+  readDeviceAuth,
   readLayoutRecord,
   requestDeviceReload,
   resetDevicePairing,
@@ -112,28 +113,34 @@ function shortenClientId(value) {
 }
 
 function mapDeviceCard(device) {
-  const pairingState = device.hasSecret ? "paired" : "not paired";
+  const pairingState = getPairedClient({ clients: device.clients })
+    ? "active"
+    : "pending";
 
   return {
     ...device,
-    canApprove: device.status === "pending" && device.hasCandidateSecret,
     canReload: device.status === "approved",
-    canResetPairing: device.hasSecret,
+    canResetPairing: device.hasSecret || Array.isArray(device.clients) && device.clients.length > 0,
     canRevoke: device.status === "approved",
     displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
-    displayLastRejectedDate: formatDateOnly(device.lastRejectedAt),
     displayLastSeen: formatRelativeSeen(device.lastStatusAt),
     detailUrl: `/admin/devices/${device.deviceCode}`,
     displayPairingState: pairingState,
-    displayLastIp: device.lastKnownIp || "-",
-    displayRejectedIp: device.lastRejectedIp || "-"
+    displayLastIp: device.lastKnownIp || "-"
   };
 }
 
-function buildClientDisplay(client) {
+function buildClientDisplay(device, deviceAuth, client) {
+  const derivedState = deriveClientState({
+    clientId: client.clientId,
+    device,
+    deviceAuth
+  });
+
   return {
     ...client,
-    canBePaired: Boolean(client.lastAuthenticatedAt),
+    canActivate: derivedState.isActivatable,
+    clientState: derivedState.state,
     displayClientId: shortenClientId(client.clientId),
     displayLastAuthenticatedAt: formatAbsoluteTimestamp(client.lastAuthenticatedAt),
     displayLastKnownIp: client.lastKnownIp || "-",
@@ -141,14 +148,12 @@ function buildClientDisplay(client) {
   };
 }
 
-function buildDeviceDetailViewModel(device, layouts, options = {}) {
-  const pairedClient = Array.isArray(device.clients)
-    ? device.clients.find((client) => client.isPairedClient) || null
-    : null;
+function buildDeviceDetailViewModel(device, deviceAuth, layouts, options = {}) {
+  const activeClient = getPairedClient(deviceAuth);
   const additionalClients = Array.isArray(device.clients)
     ? device.clients
       .filter((client) => !client.isPairedClient)
-      .map(buildClientDisplay)
+      .map((client) => buildClientDisplay(device, deviceAuth, client))
     : [];
 
   return {
@@ -158,17 +163,17 @@ function buildDeviceDetailViewModel(device, layouts, options = {}) {
       ...mapDeviceCard(device),
       displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
       displayOfficialSeenAbsolute: formatAbsoluteTimestamp(device.lastStatusAt),
-      displayPairingState:
-        pairedClient ? "paired active client" : "not paired"
+      displayActivationState:
+        activeClient ? "active client" : "pending"
     },
-    canPairClients: device.hasSecret && device.status === "approved",
-    officialPairedClient: pairedClient
+    canActivateClients: device.status !== "revoked",
+    officialActiveClient: activeClient
       ? {
-        ...buildClientDisplay(pairedClient),
+        ...buildClientDisplay(device, deviceAuth, activeClient),
         displaySeen: formatRelativeSeen(device.lastStatusAt),
         lastConnectedAt: device.lastConnectedAt || null,
         displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
-        pairedStateLabel: "paired active client"
+        activeStateLabel: "active client"
       }
       : null,
     additionalClients,
@@ -320,9 +325,13 @@ async function renderDeviceDetailPage(res, deviceCode, options = {}) {
     });
   }
 
+  const deviceAuth = (await readDeviceAuth(deviceCode)) || {
+    clients: device.clients
+  };
+
   return res.status(httpStatus).render(
     "pages/admin-device-detail",
-    buildDeviceDetailViewModel(device, layouts, { actionErrorMessage })
+    buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })
   );
 }
 
@@ -612,7 +621,7 @@ router.post("/devices/:deviceCode/layout", async (req, res, next) => {
   }
 });
 
-router.post("/devices/:deviceCode/pair-client", async (req, res, next) => {
+router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
     const clientId =
@@ -620,13 +629,13 @@ router.post("/devices/:deviceCode/pair-client", async (req, res, next) => {
 
     if (!clientId) {
       return renderDeviceDetailPage(res, deviceCode, {
-        actionErrorMessage: "Select a valid client before pairing.",
+        actionErrorMessage: "Select a valid client before activation.",
         httpStatus: 400
       });
     }
 
     try {
-      await pairDeviceToClient(deviceCode, clientId);
+      await activateDeviceClient(deviceCode, clientId);
     } catch (error) {
       if (error?.name === "ValidationError") {
         return renderDeviceDetailPage(res, deviceCode, {
@@ -639,21 +648,6 @@ router.post("/devices/:deviceCode/pair-client", async (req, res, next) => {
     }
 
     return res.redirect(`/admin/devices/${deviceCode}`);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post("/devices/:deviceCode/approve", async (req, res, next) => {
-  try {
-    const { deviceCode } = req.params;
-    const deviceAuth = await activateCandidateSecret(deviceCode);
-
-    if (deviceAuth?.secretHash) {
-      await updateDevice(deviceCode, { status: "approved" });
-    }
-
-    redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
     next(error);
   }

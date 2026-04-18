@@ -20,14 +20,6 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-const ALLOWED_CLIENT_ACCESS_STATES = new Set([
-  "authorized",
-  "pending",
-  "auth_mismatch",
-  "revoked",
-  "not_paired"
-]);
-
 function isValidSize(size) {
   return /^\d+(\.\d+)?(%|px|fr)$/.test(size);
 }
@@ -134,29 +126,6 @@ function validateDeviceAuth(deviceAuth) {
   }
 
   if (
-    deviceAuth.lastRejectedAt !== undefined &&
-    typeof deviceAuth.lastRejectedAt !== "string"
-  ) {
-    result.errors.push("Invalid device auth: lastRejectedAt must be a string");
-  }
-
-  if (
-    deviceAuth.lastRejectedIp !== undefined &&
-    typeof deviceAuth.lastRejectedIp !== "string"
-  ) {
-    result.errors.push("Invalid device auth: lastRejectedIp must be a string");
-  }
-
-  if (
-    deviceAuth.lastRejectedReason !== undefined &&
-    typeof deviceAuth.lastRejectedReason !== "string"
-  ) {
-    result.errors.push(
-      "Invalid device auth: lastRejectedReason must be a string"
-    );
-  }
-
-  if (
     deviceAuth.reloadVersion !== undefined &&
     !Number.isInteger(deviceAuth.reloadVersion)
   ) {
@@ -168,7 +137,6 @@ function validateDeviceAuth(deviceAuth) {
       result.errors.push("Invalid device auth: clients must be an array");
     } else {
       let pairedClientCount = 0;
-      let authorizedClientCount = 0;
 
       deviceAuth.clients.forEach((client, index) => {
         const clientPath = `device auth.clients[${index}]`;
@@ -198,14 +166,13 @@ function validateDeviceAuth(deviceAuth) {
           );
         }
 
-        if (!ALLOWED_CLIENT_ACCESS_STATES.has(client.accessState)) {
+        if (
+          client.sessionSecretHash !== undefined &&
+          typeof client.sessionSecretHash !== "string"
+        ) {
           result.errors.push(
-            `Invalid ${clientPath}.accessState: must be authorized, pending, auth_mismatch, revoked, or not_paired`
+            `Invalid ${clientPath}.sessionSecretHash: must be a string`
           );
-        }
-
-        if (client.accessState === "authorized") {
-          authorizedClientCount += 1;
         }
 
         if (typeof client.isPairedClient !== "boolean") {
@@ -214,12 +181,6 @@ function validateDeviceAuth(deviceAuth) {
           );
         } else if (client.isPairedClient) {
           pairedClientCount += 1;
-
-          if (client.accessState !== "authorized") {
-            result.errors.push(
-              `Invalid ${clientPath}: paired client must use accessState "authorized"`
-            );
-          }
         }
 
         if (
@@ -240,12 +201,6 @@ function validateDeviceAuth(deviceAuth) {
       if (pairedClientCount > 1) {
         result.errors.push(
           "Invalid device auth: only one client may have isPairedClient=true"
-        );
-      }
-
-      if (pairedClientCount === 0 && authorizedClientCount > 0) {
-        result.errors.push(
-          'Invalid device auth: authorized client requires one isPairedClient=true entry'
         );
       }
     }
