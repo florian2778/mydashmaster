@@ -49,9 +49,11 @@ Using localStorage is an intentional MVP tradeoff. The secret is accessible via 
 Admin must manually activate one authenticated client.
 
 On approval:
-- candidateSecretHash becomes the active secret hash
+- device becomes approved
+- authenticated browser clients may become activation candidates
 - one selected client becomes the active client
-- only this registered secret is valid for future authentication
+- that selected client defines the active `secretHash`
+- only the active client may render the layout
 
 ---
 
@@ -108,6 +110,20 @@ Effects:
 If client loses local storage (e.g. browser reset):
 - device cannot authenticate anymore
 - must be re-activated by admin
+
+---
+
+## Reset Activation
+
+- admin can reset activation without revoking the device
+- current active assignment is removed
+- current `secretHash` is removed
+- device remains approved
+
+Effects:
+- no client remains active
+- known authenticated and recently seen browser clients may be activated again
+- the next activated client defines the new active `secretHash`
 
 ---
 

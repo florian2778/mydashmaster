@@ -302,7 +302,7 @@ test("revoked device shows distinct revoked state", async () => {
   }
 });
 
-test("admin reset pairing clears active assignment but keeps the current security basis", async () => {
+test("admin reset activation clears active assignment and opens a new client selection cycle", async () => {
   const deviceCode = "resetpair";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -363,7 +363,8 @@ test("admin reset pairing clears active assignment but keeps the current securit
     const deviceAuth = await readDeviceAuth(deviceCode);
 
     assert.equal(device.status, "approved");
-    assert.equal(deviceAuth.secretHash, hashDeviceSecret("secret-alpha"));
+    assert.equal(deviceAuth.secretHash, undefined);
+    assert.equal(deviceAuth.lastStatusAt, undefined);
     assert.equal(deviceAuth.candidateSecretHash, undefined);
     assert.equal(
       deviceAuth.clients.every((client) => client.isPairedClient === false),
@@ -450,10 +451,10 @@ test("admin device detail shows Activate again after reset for recent authentica
           deviceAuth.clients.every((client) => client.isPairedClient === false),
           true
         );
-        assert.match(detailHtml, /No active client\. Device is currently pending\./);
+        assert.match(detailHtml, /No active client selected\./);
         assert.match(detailHtml, /value="client-a"/);
         assert.match(detailHtml, /value="client-b"/);
-        assert.match(detailHtml, />Activate</);
+        assert.equal((detailHtml.match(/>Activate</g) || []).length, 2);
       });
     });
   } finally {
@@ -729,7 +730,7 @@ test("admin device detail page shows no active client empty state after reset", 
         const detailBody = await detailResponse.text();
 
         assert.equal(detailResponse.status, 200);
-        assert.match(detailBody, /No active client\. Device is currently pending\./);
+        assert.match(detailBody, /No active client selected\./);
         assert.doesNotMatch(detailBody, /Client state: <strong>active<\/strong>/);
       });
     });
@@ -1636,7 +1637,7 @@ test("fresh browser after reset can authenticate, stays pending, and becomes off
   }
 });
 
-test("reset keeps current-cycle authentication so a recently seen client can be activated again", async () => {
+test("reset activation keeps authenticated candidates so a recently seen client can be activated again", async () => {
   const deviceCode = "stalepair";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
@@ -1811,7 +1812,7 @@ test("former active client stays pending after reset and does not advance heartb
       const deviceAuth = await readDeviceAuth(deviceCode);
       const originalClient = deviceAuth.clients.find((client) => client.clientId === firstClientId);
 
-      assert.equal(deviceAuth.lastStatusAt, oldHeartbeat);
+      assert.equal(deviceAuth.lastStatusAt, undefined);
       assert.equal(originalClient.isPairedClient, false);
     });
   } finally {

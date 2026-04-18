@@ -388,7 +388,9 @@ Wichtige Regel:
 - `clientId` ist nur Client-Tracking
 - gültige Browser-Session und explizite Admin-Aktivierung sind getrennte Schritte
 - ein Client darf erst dann als aktivierbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde und er noch als aktuell aktiv gilt
-- nach `Reset activation` bleibt die technische Auth-Basis bestehen; nur die aktive Zuordnung wird entfernt
+- nach `Reset activation` wird die aktive Zuordnung entfernt und der bisherige `secretHash` gelöscht
+- vorhandene authentifizierte Clients bleiben als Kandidaten sichtbar
+- der nächste explizit aktivierte Client definiert den neuen `secretHash`
 - `pending` bedeutet:
   - aktuell existiert kein active client
   - Browser darf sich authentifizieren und Session aufbauen

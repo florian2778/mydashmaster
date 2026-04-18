@@ -121,6 +121,7 @@ Reset activation muss:
 - den aktuellen offiziellen Aktivierungszustand entfernen
 - für alle Clients:
   - `isPairedClient = false`
+- `secretHash` entfernen
 
 Nach Reset:
 - kein Client ist aktiv
@@ -128,6 +129,7 @@ Nach Reset:
 - das Layout verschwindet überall
 - bekannte technisch authentifizierte Clients dürfen technisch authentifiziert bleiben
 - solche Clients dürfen sofort wieder direkt aktiviert werden, wenn sie noch aktuell aktiv sind
+- beim nächsten `Activate` wird der `sessionSecretHash` des gewählten Clients zum neuen `secretHash`
 
 ---
 

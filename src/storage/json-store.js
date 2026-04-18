@@ -506,6 +506,8 @@ async function resetDevicePairing(deviceCode) {
       ...client,
       isPairedClient: false
     })),
+    lastStatusAt: undefined,
+    secretHash: undefined,
     updatedAt: new Date().toISOString()
   });
 }

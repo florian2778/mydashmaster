@@ -180,7 +180,7 @@ Authenticated browser session:
 - a valid device session cookie represents an authenticated browser session
 - authenticated browser session is separate from `clientId`
 - authenticated browser session is separate from explicit admin pairing
-- after reset pairing, a browser may authenticate again and receive a valid device session cookie while still remaining `pending`
+- after reset activation, a browser may stay technically authenticated and still remain `pending`
 
 Exclusivity:
 - an active client is the single official client context for one `deviceCode`
@@ -197,10 +197,11 @@ Post-reset recovery flow:
 1. Admin resets activation
 2. No client remains active
 3. Device status stays `approved`
-4. Active `secretHash` remains in place
+4. Current `secretHash` is cleared
 5. Known clients derive to `pending`
 6. Recently active and technically authenticated clients may be activated again immediately
-7. Only an explicitly activated client may render the layout and update the official device heartbeat
+7. The next activated client defines the new `secretHash`
+8. Only an explicitly activated client may render the layout and update the official device heartbeat
 
 State decision rule:
 - `pending` means no active client currently exists

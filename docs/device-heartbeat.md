@@ -79,7 +79,7 @@ Three layers must stay separate:
   - used only for client activity tracking
 
 - authenticated browser session
-  - represented by a valid device session cookie plus current-cycle auth evidence
+  - represented by a valid device session cookie plus stored client auth evidence
   - technical prerequisite only
 
 - active client
@@ -131,12 +131,13 @@ Official heartbeat update rule:
 
 Reset activation must:
 - remove the current official active assignment
-- keep the current technical authentication basis intact
+- clear the current `secretHash`
 
 After reset:
 - no client is active
 - all known clients derive to `pending`
 - technically authenticated and recently seen clients may be activatable again immediately
+- the next activated client defines the new `secretHash`
 - `lastStatusAt` must stop advancing until a new active client exists
 
 ---

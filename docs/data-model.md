@@ -147,7 +147,9 @@ Session and pairing rules:
 - a valid device session cookie represents an authenticated browser session.
 - `isPairedClient = true` represents explicit admin activation only.
 - after reset activation, a browser may stay technically authenticated and still remain visible `pending`.
-- explicit admin activation requires a client with recorded `lastAuthenticatedAt`, current-cycle authentication evidence, and recent activity.
+- reset activation clears the current `secretHash` and opens a new activation cycle.
+- explicit admin activation requires a client with recorded `lastAuthenticatedAt`, stored `sessionSecretHash`, and recent activity.
+- after reset activation, the selected client defines the new `secretHash`.
 - only a client that is both:
   - authenticated via valid device session
   - explicitly activated via `isPairedClient = true`
