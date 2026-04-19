@@ -476,7 +476,8 @@ body.device-page .layout-node--box {
 
 .device-overview-list {
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .admin-device-create {
@@ -530,47 +531,128 @@ body.device-page .layout-node--box {
 }
 
 .device-overview-card {
-  align-items: start;
+  background: #fff;
   border: 1px solid #d8e1ea;
-  border-radius: 12px;
+  border-radius: 16px;
   display: grid;
   gap: 1rem;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 1rem;
+  min-height: 13rem;
+  padding: 1.1rem;
 }
 
-.device-overview-link {
-  color: inherit;
-  display: block;
+.device-overview-card--online {
+  border-color: #9bcdb1;
+}
+
+.device-overview-card--offline {
+  border-color: #9bb9db;
+}
+
+.device-overview-card--activatable {
+  border-color: #e5c26a;
+}
+
+.device-overview-card--inactive {
+  border-color: #e3a8a8;
+}
+
+.device-overview-card-head {
+  align-items: start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.device-overview-card-titlewrap {
+  display: grid;
+  gap: 0.3rem;
   min-width: 0;
+}
+
+.device-overview-card-title {
+  font-size: 1.05rem;
+  line-height: 1.3;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.device-overview-device-link {
+  color: #52606d;
+  font-size: 0.92rem;
   text-decoration: none;
 }
 
-.device-overview-link:hover h2 {
+.device-overview-device-link:hover {
   text-decoration: underline;
 }
 
-.device-overview-meta {
-  display: grid;
-  gap: 0.65rem;
+.device-overview-edit-link {
+  align-items: center;
+  background: #f4f7fb;
+  border: 1px solid #d8e1ea;
+  border-radius: 999px;
+  color: #334155;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  height: 2rem;
+  justify-content: center;
+  text-decoration: none;
+  width: 2rem;
 }
 
+.device-overview-edit-link:hover {
+  background: #edf2f7;
+}
+
+.device-overview-statusline {
+  align-items: center;
+  display: flex;
+  gap: 0.55rem;
+}
+
+.device-overview-status-bubble {
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+  height: 0.85rem;
+  width: 0.85rem;
+}
+
+.device-overview-status-bubble--online {
+  background: #1f9d55;
+}
+
+.device-overview-status-bubble--offline {
+  background: #2563eb;
+}
+
+.device-overview-status-bubble--activatable {
+  background: #d4a017;
+}
+
+.device-overview-status-bubble--inactive {
+  background: #dc2626;
+}
+
+.device-overview-status-text {
+  color: #1f2933;
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
+.device-overview-details {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.device-overview-layout,
+.device-overview-secondary,
 .device-diagnostic-note {
   color: #52606d;
-  font-size: 0.84rem;
+  font-size: 0.92rem;
   line-height: 1.4;
   margin: 0;
-}
-
-.device-overview-facts {
-  color: #52606d;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.device-overview-facts--primary {
-  font-weight: 500;
 }
 
 .admin-inline-link {
@@ -581,28 +663,6 @@ body.device-page .layout-node--box {
 
 .admin-inline-link:hover {
   text-decoration: underline;
-}
-
-.device-overview-facts--secondary {
-  font-size: 0.92rem;
-}
-
-.device-overview-actions {
-  display: grid;
-  gap: 0.65rem;
-  justify-items: end;
-}
-
-.device-overview-actions-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-
-.device-overview-actions-destructive {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .admin-action-button {
@@ -930,8 +990,7 @@ body.device-page .layout-node--box {
 }
 
 @media (max-width: 900px) {
-  .admin-device-create,
-  .device-overview-card {
+  .admin-device-create {
     grid-template-columns: 1fr;
   }
 
@@ -942,11 +1001,8 @@ body.device-page .layout-node--box {
     flex-direction: column;
   }
 
-  .device-overview-actions,
-  .device-overview-actions-destructive,
-  .device-overview-actions-main {
-    justify-content: flex-start;
-    justify-items: start;
+  .device-overview-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .layout-preview {
@@ -957,6 +1013,12 @@ body.device-page .layout-node--box {
   .site-header-actions {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .device-overview-list {
+    grid-template-columns: 1fr;
   }
 }
 

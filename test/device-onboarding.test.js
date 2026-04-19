@@ -544,6 +544,14 @@ test("admin device cards show formatted fields and filtered actions", async () =
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          clientId: "paired-client",
+          isPairedClient: true,
+          lastSeenAt: new Date().toISOString(),
+          userAgent: "CardViewClient/1.0"
+        }
+      ],
       deviceCode,
       lastConnectedAt: "2026-04-13T00:00:00.000Z",
       lastKnownIp: "203.0.113.99",
@@ -563,14 +571,16 @@ test("admin device cards show formatted fields and filtered actions", async () =
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Last access: 13\.04\.2026/);
-        assert.match(body, /IP: 203\.0\.113\.99/);
-        assert.match(body, /Seen: (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
+        assert.match(body, /Layout: <strong>layout-2<\/strong>/);
+        assert.match(body, /Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
         assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
-        assert.match(body, /Reload/);
-        assert.match(body, /Reset activation/);
-        assert.match(body, /Revoke/);
-        assert.match(body, /Delete/);
+        assert.match(body, new RegExp(`href="/d/${deviceCode}"`));
+        assert.match(body, /device-overview-status-bubble--online/);
+        assert.doesNotMatch(body, /IP: 203\.0\.113\.99/);
+        assert.doesNotMatch(body, />Reload</);
+        assert.doesNotMatch(body, />Reset activation</);
+        assert.doesNotMatch(body, />Revoke</);
+        assert.doesNotMatch(body, />Delete</);
       });
     });
   } finally {
@@ -1998,7 +2008,210 @@ test("admin overview Seen uses official heartbeat instead of non-active client a
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Seen: 3m ago/);
+        assert.match(body, /Seen 3m ago/);
+      });
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("admin overview data endpoint derives online offline activatable and inactive from existing client state model", async () => {
+  const deviceCodes = ["ovonl01", "ovoff01", "ovact01", "ovina01"];
+  const deviceFilePaths = deviceCodes.map((deviceCode) =>
+    path.join(devicesDir, `${deviceCode}.json`)
+  );
+  const deviceAuthFilePaths = deviceCodes.map((deviceCode) =>
+    path.join(deviceAuthDir, `${deviceCode}.json`)
+  );
+  const now = Date.now();
+  const recentIso = new Date(now - 10 * 1000).toISOString();
+  const staleIso = new Date(now - 45 * 1000).toISOString();
+  const absoluteAccessIso = new Date(now - 5 * 60 * 1000).toISOString();
+
+  await Promise.all(deviceFilePaths.map((filePath) => removeIfExists(filePath)));
+  await Promise.all(deviceAuthFilePaths.map((filePath) => removeIfExists(filePath)));
+
+  try {
+    await writeDevice("ovonl01", {
+      description: "Online display",
+      deviceCode: "ovonl01",
+      layoutId: "layout-1",
+      status: "approved"
+    });
+    await updateDeviceAuth("ovonl01", {
+      clients: [
+        {
+          clientId: "active-online",
+          isPairedClient: true,
+          lastSeenAt: recentIso,
+          userAgent: "OnlineClient/1.0"
+        }
+      ],
+      deviceCode: "ovonl01",
+      lastConnectedAt: recentIso,
+      lastStatusAt: recentIso,
+      updatedAt: recentIso
+    });
+
+    await writeDevice("ovoff01", {
+      description: "Offline display",
+      deviceCode: "ovoff01",
+      layoutId: "layout-1",
+      status: "approved"
+    });
+    await updateDeviceAuth("ovoff01", {
+      clients: [
+        {
+          clientId: "active-offline",
+          isPairedClient: true,
+          lastSeenAt: recentIso,
+          userAgent: "OfflineClient/1.0"
+        }
+      ],
+      deviceCode: "ovoff01",
+      lastConnectedAt: absoluteAccessIso,
+      lastStatusAt: staleIso,
+      updatedAt: recentIso
+    });
+
+    await writeDevice("ovact01", {
+      description: "Activatable display",
+      deviceCode: "ovact01",
+      layoutId: "layout-2",
+      status: "approved"
+    });
+    await updateDeviceAuth("ovact01", {
+      clients: [
+        {
+          clientId: "activatable-client",
+          isPairedClient: false,
+          lastAuthenticatedAt: recentIso,
+          lastSeenAt: recentIso,
+          sessionSecretHash: hashDeviceSecret("secret-activatable"),
+          userAgent: "ActivatableClient/1.0"
+        }
+      ],
+      deviceCode: "ovact01",
+      lastConnectedAt: absoluteAccessIso,
+      updatedAt: recentIso
+    });
+
+    await writeDevice("ovina01", {
+      description: "Inactive display",
+      deviceCode: "ovina01",
+      status: "pending"
+    });
+    await updateDeviceAuth("ovina01", {
+      clients: [
+        {
+          clientId: "inactive-client",
+          isPairedClient: false,
+          lastSeenAt: recentIso,
+          userAgent: "InactiveClient/1.0"
+        }
+      ],
+      deviceCode: "ovina01",
+      lastConnectedAt: absoluteAccessIso,
+      updatedAt: recentIso
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(`${baseUrl}/admin/devices/overview-data`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const payload = await response.json();
+        const deviceByCode = new Map(
+          payload.devices.map((device) => [device.deviceCode, device])
+        );
+
+        assert.equal(response.status, 200);
+        assert.equal(deviceByCode.get("ovonl01").overviewState, "online");
+        assert.match(deviceByCode.get("ovonl01").displaySecondaryLine, /^Seen /);
+        assert.equal(deviceByCode.get("ovonl01").lastStatusAt, recentIso);
+        assert.equal(deviceByCode.get("ovoff01").overviewState, "offline");
+        assert.match(deviceByCode.get("ovoff01").displaySecondaryLine, /^Seen /);
+        assert.equal(deviceByCode.get("ovoff01").lastStatusAt, staleIso);
+        assert.equal(deviceByCode.get("ovact01").overviewState, "activatable");
+        assert.match(
+          deviceByCode.get("ovact01").displaySecondaryLine,
+          /^Last access: \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
+        );
+        assert.equal(deviceByCode.get("ovact01").lastConnectedAt, absoluteAccessIso);
+        assert.equal(deviceByCode.get("ovina01").overviewState, "inactive");
+        assert.equal(deviceByCode.get("ovina01").overviewStateLabel, "Not activated");
+        assert.equal(deviceByCode.get("ovina01").lastConnectedAt, absoluteAccessIso);
+      });
+    });
+  } finally {
+    await Promise.all(deviceFilePaths.map((filePath) => removeIfExists(filePath)));
+    await Promise.all(deviceAuthFilePaths.map((filePath) => removeIfExists(filePath)));
+  }
+});
+
+test("admin device overview renders tile state summary without inline actions and includes polling hook", async () => {
+  const deviceCode = "ovtile01";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const nowIso = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      description: "Tile Device",
+      deviceCode,
+      layoutId: "layout-1",
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          clientId: "active-client",
+          isPairedClient: true,
+          lastSeenAt: nowIso,
+          userAgent: "TileClient/1.0"
+        }
+      ],
+      deviceCode,
+      lastConnectedAt: nowIso,
+      lastStatusAt: nowIso,
+      updatedAt: nowIso
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(`${baseUrl}/admin/devices`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const body = await response.text();
+
+        assert.equal(response.status, 200);
+        assert.match(body, /Tile Device/);
+        assert.match(body, new RegExp(`href="/d/${deviceCode}"`));
+        assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
+        assert.match(body, /device-overview-status-bubble--online/);
+        assert.match(body, /Online/);
+        assert.match(body, /Layout: <strong>layout-1<\/strong>/);
+        assert.match(body, /data-last-status-at="[^"]+"/);
+        assert.match(body, /data-last-connected-at="[^"]+"/);
+        assert.doesNotMatch(body, /candidate secret/i);
+        assert.doesNotMatch(body, />Details</);
+        assert.doesNotMatch(body, />Revoke</);
+        assert.match(body, /fetch\("\/admin\/devices\/overview-data"/);
+        assert.match(body, /window\.setInterval\(refreshOverview, pollIntervalMs\)/);
+        assert.match(body, /const localUpdateIntervalMs = 1000/);
+        assert.match(body, /function formatRelativeSeen\(timestamp\)/);
+        assert.match(body, /window\.setInterval\(updateAllRelativeTimes, localUpdateIntervalMs\)/);
       });
     });
   } finally {

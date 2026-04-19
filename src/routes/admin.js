@@ -31,6 +31,8 @@ const {
 const { validateLayout } = require("../storage/validators");
 
 const router = express.Router();
+const DEFAULT_DEVICE_POLL_INTERVAL_MS = 10000;
+const ONLINE_HEARTBEAT_MULTIPLIER = 3;
 
 function formatDateOnly(value) {
   if (!value) {
@@ -62,6 +64,26 @@ function formatAbsoluteTimestamp(value) {
   }
 
   return date.toISOString();
+}
+
+function formatAbsoluteOverviewTimestamp(value) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const year = String(date.getUTCFullYear());
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
 function formatRelativeSeen(value) {
@@ -104,6 +126,31 @@ function formatRelativeSeen(value) {
   return `${diffDays}d ago`;
 }
 
+function getConfiguredDevicePollIntervalMs() {
+  const configuredPollIntervalMs = Number.parseInt(
+    process.env.DEVICE_POLL_INTERVAL_MS || "",
+    10
+  );
+
+  return Number.isInteger(configuredPollIntervalMs) && configuredPollIntervalMs > 0
+    ? configuredPollIntervalMs
+    : DEFAULT_DEVICE_POLL_INTERVAL_MS;
+}
+
+function isOfficialHeartbeatFresh(value, now = Date.now()) {
+  if (!value) {
+    return false;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  return now - date.getTime() <= getConfiguredDevicePollIntervalMs() * ONLINE_HEARTBEAT_MULTIPLIER;
+}
+
 function shortenClientId(value) {
   if (typeof value !== "string" || value === "") {
     return "-";
@@ -112,21 +159,100 @@ function shortenClientId(value) {
   return value.length <= 8 ? value : `${value.slice(0, 8)}...`;
 }
 
-function mapDeviceCard(device) {
-  const pairingState = getPairedClient({ clients: device.clients })
-    ? "active"
-    : "pending";
+function getOverviewStateLabel(overviewState) {
+  const labels = {
+    activatable: "Not activated",
+    inactive: "Not activated",
+    offline: "Offline",
+    online: "Online"
+  };
+
+  return labels[overviewState] || "Not activated";
+}
+
+function getOverviewSecondaryLine(device, overviewState) {
+  if (overviewState === "online" || overviewState === "offline") {
+    return `Seen ${formatRelativeSeen(device.lastStatusAt)}`;
+  }
+
+  return `Last access: ${formatAbsoluteOverviewTimestamp(device.lastConnectedAt)}`;
+}
+
+async function mapDeviceCard(device) {
+  const deviceAuth = await readDeviceAuth(device.deviceCode);
+  const effectiveDeviceAuth = {
+    clients: device.clients,
+    secretHash: deviceAuth?.secretHash
+  };
+  const activeClient = getPairedClient(effectiveDeviceAuth);
+  const hasActiveClient = Boolean(activeClient);
+  const activeClientHeartbeatFresh =
+    hasActiveClient && isOfficialHeartbeatFresh(device.lastStatusAt);
+  const hasActivatableClient = Array.isArray(device.clients)
+    ? device.clients.some((client) => {
+      if (!client || client.isPairedClient) {
+        return false;
+      }
+
+      const derivedState = deriveClientState({
+        clientId: client.clientId,
+        device,
+        deviceAuth: effectiveDeviceAuth
+      });
+
+      return derivedState.isActivatable;
+    })
+    : false;
+
+  let overviewState = "inactive";
+
+  if (hasActiveClient) {
+    overviewState = activeClientHeartbeatFresh ? "online" : "offline";
+  } else if (hasActivatableClient) {
+    overviewState = "activatable";
+  }
 
   return {
     ...device,
     canReload: device.status === "approved",
-    canResetPairing: device.hasSecret || Array.isArray(device.clients) && device.clients.length > 0,
+    canResetPairing:
+      device.hasSecret ||
+      (Array.isArray(device.clients) && device.clients.length > 0),
     canRevoke: device.status === "approved",
-    displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
-    displayLastSeen: formatRelativeSeen(device.lastStatusAt),
     detailUrl: `/admin/devices/${device.deviceCode}`,
-    displayPairingState: pairingState,
-    displayLastIp: device.lastKnownIp || "-"
+    devicePublicUrl: `/d/${device.deviceCode}`,
+    displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
+    displayLastIp: device.lastKnownIp || "-",
+    displayLastSeen: formatRelativeSeen(device.lastStatusAt),
+    displaySecondaryLine: getOverviewSecondaryLine(device, overviewState),
+    displayTitle: device.description || device.deviceCode,
+    lastConnectedAt: device.lastConnectedAt || null,
+    lastStatusAt: device.lastStatusAt || null,
+    hasActiveClient,
+    hasActivatableClient,
+    activeClientHeartbeatFresh,
+    overviewState,
+    overviewStateLabel: getOverviewStateLabel(overviewState)
+  };
+}
+
+async function buildDeviceOverviewCards(devices) {
+  return Promise.all(devices.map((device) => mapDeviceCard(device)));
+}
+
+function buildDeviceOverviewPayload(devices) {
+  return {
+    devices: devices.map((device) => ({
+      activeClientHeartbeatFresh: device.activeClientHeartbeatFresh,
+      deviceCode: device.deviceCode,
+      displaySecondaryLine: device.displaySecondaryLine,
+      lastConnectedAt: device.lastConnectedAt,
+      lastStatusAt: device.lastStatusAt,
+      hasActiveClient: device.hasActiveClient,
+      hasActivatableClient: device.hasActivatableClient,
+      overviewState: device.overviewState,
+      overviewStateLabel: device.overviewStateLabel
+    }))
   };
 }
 
@@ -148,19 +274,20 @@ function buildClientDisplay(device, deviceAuth, client) {
   };
 }
 
-function buildDeviceDetailViewModel(device, deviceAuth, layouts, options = {}) {
+async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options = {}) {
   const activeClient = getPairedClient(deviceAuth);
   const additionalClients = Array.isArray(device.clients)
     ? device.clients
       .filter((client) => !client.isPairedClient)
       .map((client) => buildClientDisplay(device, deviceAuth, client))
     : [];
+  const overviewDevice = await mapDeviceCard(device);
 
   return {
     actionErrorMessage: options.actionErrorMessage || null,
     assignableLayouts: getAssignableLayouts(layouts),
     device: {
-      ...mapDeviceCard(device),
+      ...overviewDevice,
       displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
       displayOfficialSeenAbsolute: formatAbsoluteTimestamp(device.lastStatusAt),
       displayActivationState:
@@ -331,7 +458,7 @@ async function renderDeviceDetailPage(res, deviceCode, options = {}) {
 
   return res.status(httpStatus).render(
     "pages/admin-device-detail",
-    buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })
+    await buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })
   );
 }
 
@@ -493,13 +620,26 @@ router.get("/devices", async (req, res, next) => {
   try {
     const [devices, layouts] = await Promise.all([listDevices(), listLayouts()]);
     const assignableLayouts = getAssignableLayouts(layouts);
+    const overviewDevices = await buildDeviceOverviewCards(devices);
 
     res.render("pages/admin-devices", {
-      devices: devices.map(mapDeviceCard),
+      devices: overviewDevices,
       heading: "Devices",
       layouts: assignableLayouts,
-      pageTitle: "Devices"
+      pageTitle: "Devices",
+      overviewPollIntervalMs: 4000
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/devices/overview-data", async (req, res, next) => {
+  try {
+    const devices = await listDevices();
+    const overviewDevices = await buildDeviceOverviewCards(devices);
+
+    res.json(buildDeviceOverviewPayload(overviewDevices));
   } catch (error) {
     next(error);
   }
@@ -530,11 +670,14 @@ router.post("/devices", async (req, res, next) => {
       );
 
       if (!hasLayout) {
+        const existingDevices = await buildDeviceOverviewCards(await listDevices());
+
         return res.status(400).render("pages/admin-devices", {
-          devices: (await listDevices()).map(mapDeviceCard),
+          devices: existingDevices,
           heading: "Devices",
           layouts: assignableLayouts,
-          pageTitle: "Devices"
+          pageTitle: "Devices",
+          overviewPollIntervalMs: 4000
         });
       }
     }

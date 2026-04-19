@@ -39,69 +39,191 @@
   <% } else { %>
     <section class="device-overview-list">
       <% devices.forEach((device) => { %>
-        <article class="device-overview-card">
-          <a class="device-overview-link" href="<%= device.detailUrl %>">
-            <div class="device-overview-meta">
-              <div class="layout-overview-topline">
-                <h2><%= device.deviceCode %></h2>
-                <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
-                  <%= device.status %>
-                </span>
-                <span class="layout-edge-indicator"><%= device.displayPairingState %></span>
-              </div>
-
-              <div class="device-overview-facts device-overview-facts--primary">
-                <span>Layout: <%= device.layoutId || "none" %></span>
-                <span>
-                  Link:
-                  <span><code>/d/<%= device.deviceCode %></code></span>
-                </span>
-                <span>
-                  <span class="admin-inline-link">Open device detail</span>
-                </span>
-              </div>
-
-              <div class="device-overview-facts device-overview-facts--secondary">
-                <span>Last access: <%= device.displayLastAccessDate %></span>
-                <span>IP: <%= device.displayLastIp %></span>
-                <span>Seen: <%= device.displayLastSeen %></span>
-                <% if (device.hasCandidateSecret) { %>
-                  <span class="layout-edge-indicator">candidate secret</span>
-                <% } %>
-              </div>
-
+        <article
+          class="device-overview-card device-overview-card--<%= device.overviewState %>"
+          data-device-code="<%= device.deviceCode %>"
+          data-last-connected-at="<%= device.lastConnectedAt || "" %>"
+          data-last-status-at="<%= device.lastStatusAt || "" %>"
+          data-overview-state="<%= device.overviewState %>"
+        >
+          <div class="device-overview-card-head">
+            <div class="device-overview-card-titlewrap">
+              <h2 class="device-overview-card-title"><%= device.displayTitle %></h2>
+              <a class="device-overview-device-link" href="<%= device.devicePublicUrl %>">
+                <code><%= device.deviceCode %></code>
+              </a>
             </div>
-          </a>
+            <a
+              aria-label="Edit device <%= device.deviceCode %>"
+              class="device-overview-edit-link"
+              href="<%= device.detailUrl %>"
+              title="Open device detail"
+            >&#9998;</a>
+          </div>
 
-          <div class="device-overview-actions">
-            <div class="device-overview-actions-main">
-              <a class="admin-action-button admin-action-button--secondary" href="<%= device.detailUrl %>">Details</a>
-              <% if (device.canResetPairing) { %>
-                <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
-                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reset activation</button>
-                </form>
-              <% } %>
-              <% if (device.canReload) { %>
-                <form action="/admin/devices/<%= device.deviceCode %>/reload" method="post">
-                  <button class="admin-action-button admin-action-button--secondary" type="submit">Reload</button>
-                </form>
-              <% } %>
-              <% if (device.canRevoke) { %>
-                <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
-                  <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
-                </form>
-              <% } %>
-            </div>
-            <div class="device-overview-actions-destructive">
-              <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
-                <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
-              </form>
-            </div>
+          <div class="device-overview-statusline">
+            <span
+              class="device-overview-status-bubble device-overview-status-bubble--<%= device.overviewState %>"
+              aria-hidden="true"
+            ></span>
+            <span
+              class="device-overview-status-text"
+              data-role="status-text"
+            ><%= device.overviewStateLabel %></span>
+          </div>
+
+          <div class="device-overview-details">
+            <p class="device-overview-layout">Layout: <strong><%= device.layoutId || "none" %></strong></p>
+            <p class="device-overview-secondary" data-role="secondary-line"><%= device.displaySecondaryLine %></p>
           </div>
         </article>
       <% }) %>
     </section>
   <% } %>
 </section>
+
+<% if (devices.length > 0) { %>
+  <script>
+    (() => {
+      const pollIntervalMs = <%- JSON.stringify(overviewPollIntervalMs) %>;
+      const localUpdateIntervalMs = 1000;
+      const cards = Array.from(document.querySelectorAll("[data-device-code]"));
+
+      if (cards.length === 0) {
+        return;
+      }
+
+      const cardByDeviceCode = new Map(
+        cards.map((card) => [card.getAttribute("data-device-code"), card])
+      );
+
+      function formatRelativeSeen(timestamp) {
+        if (!timestamp) {
+          return "Seen -";
+        }
+
+        const date = new Date(timestamp);
+
+        if (Number.isNaN(date.getTime())) {
+          return "Seen -";
+        }
+
+        const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+
+        if (diffSeconds < 5) {
+          return "Seen just now";
+        }
+
+        if (diffSeconds < 60) {
+          return `Seen ${diffSeconds}s ago`;
+        }
+
+        const diffMinutes = Math.floor(diffSeconds / 60);
+
+        if (diffMinutes < 60) {
+          return `Seen ${diffMinutes}m ago`;
+        }
+
+        const diffHours = Math.floor(diffMinutes / 60);
+
+        if (diffHours < 24) {
+          return `Seen ${diffHours}h ago`;
+        }
+
+        const diffDays = Math.floor(diffHours / 24);
+        return `Seen ${diffDays}d ago`;
+      }
+
+      function updateRelativeTime(card) {
+        const state = card.dataset.overviewState;
+        const secondaryLine = card.querySelector('[data-role="secondary-line"]');
+
+        if (!secondaryLine) {
+          return;
+        }
+
+        if (state === "online" || state === "offline") {
+          secondaryLine.textContent = formatRelativeSeen(card.dataset.lastStatusAt || "");
+        }
+      }
+
+      function updateAllRelativeTimes() {
+        cards.forEach((card) => updateRelativeTime(card));
+      }
+
+      function applyCardUpdate(card, device) {
+        const previousState = card.dataset.overviewState;
+        const nextState = device.overviewState;
+
+        if (previousState && previousState !== nextState) {
+          card.classList.remove(`device-overview-card--${previousState}`);
+        }
+
+        card.dataset.overviewState = nextState;
+        card.dataset.lastConnectedAt = device.lastConnectedAt || "";
+        card.dataset.lastStatusAt = device.lastStatusAt || "";
+        card.classList.add(`device-overview-card--${nextState}`);
+
+        const bubble = card.querySelector(".device-overview-status-bubble");
+        if (bubble) {
+          if (previousState && previousState !== nextState) {
+            bubble.classList.remove(`device-overview-status-bubble--${previousState}`);
+          }
+
+          bubble.classList.add(`device-overview-status-bubble--${nextState}`);
+        }
+
+        const statusText = card.querySelector('[data-role="status-text"]');
+        if (statusText) {
+          statusText.textContent = device.overviewStateLabel;
+        }
+
+        const secondaryLine = card.querySelector('[data-role="secondary-line"]');
+        if (secondaryLine) {
+          if (nextState === "online" || nextState === "offline") {
+            secondaryLine.textContent = formatRelativeSeen(device.lastStatusAt || "");
+          } else {
+            secondaryLine.textContent = device.displaySecondaryLine;
+          }
+        }
+      }
+
+      async function refreshOverview() {
+        try {
+          const response = await fetch("/admin/devices/overview-data", {
+            credentials: "same-origin",
+            headers: {
+              Accept: "application/json"
+            }
+          });
+
+          if (!response.ok) {
+            return;
+          }
+
+          const payload = await response.json();
+
+          if (!payload || !Array.isArray(payload.devices)) {
+            return;
+          }
+
+          payload.devices.forEach((device) => {
+            const card = cardByDeviceCode.get(device.deviceCode);
+
+            if (card) {
+              applyCardUpdate(card, device);
+            }
+          });
+        } catch (error) {
+          console.error("Failed to refresh device overview", error);
+        }
+      }
+
+      updateAllRelativeTimes();
+      window.setInterval(refreshOverview, pollIntervalMs);
+      window.setInterval(updateAllRelativeTimes, localUpdateIntervalMs);
+    })();
+  </script>
+<% } %>
 
 <%- include("../partials/footer") %>
