@@ -4,11 +4,12 @@
   <header class="admin-layout-detail-header">
     <div class="admin-layout-detail-heading">
       <div class="admin-layout-detail-titleline">
-        <h1><%= layout.layoutId %></h1>
+        <h1><%= (layout.layout && layout.layout.description) || layout.layoutId %></h1>
         <span class="layout-status layout-status--<%= validationStatus %>">
           <%= validationStatus %>
         </span>
       </div>
+      <p class="admin-layout-detail-version">layoutId: <strong><%= layout.layoutId %></strong></p>
       <p class="admin-layout-detail-version">layoutVersion: <strong><%= versionDisplay %></strong></p>
       <% if (versionNote) { %>
         <p class="admin-layout-detail-migration-note"><%= versionNote %></p>
@@ -17,10 +18,16 @@
 
     <div class="admin-layout-detail-actions">
       <% if (editMode) { %>
-        <a class="admin-secondary-link" href="/admin/layouts/<%= layout.layoutId %>">Back to read-only</a>
+        <a class="admin-secondary-link" href="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>">Back to read-only</a>
       <% } else { %>
         <a class="admin-secondary-link" href="/admin/layouts">Back to layouts</a>
-        <a class="admin-action-button" href="/admin/layouts/<%= layout.layoutId %>?mode=edit">Edit</a>
+        <form action="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>/duplicate" method="post">
+          <button class="admin-action-button admin-action-button--secondary" type="submit">Duplicate</button>
+        </form>
+        <form action="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>/delete" method="post">
+          <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
+        </form>
+        <a class="admin-action-button" href="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>?mode=edit">Edit</a>
       <% } %>
     </div>
   </header>
@@ -86,7 +93,9 @@
     </div>
 
     <% if (editMode) { %>
-      <form action="/admin/layouts/<%= layout.layoutId %>" method="post" class="admin-layout-editor-form">
+      <form action="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>" method="post" class="admin-layout-editor-form">
+        <label class="admin-layout-editor-label" for="description">Description</label>
+        <input id="description" name="description" type="text" value="<%= descriptionValue %>">
         <label class="admin-layout-editor-label" for="jsonContent">Layout JSON</label>
         <textarea id="jsonContent" name="jsonContent" class="admin-layout-editor"><%= draftJsonContent %></textarea>
         <div class="admin-layout-editor-actions">

@@ -424,6 +424,81 @@ async function writeLayout(layoutId, layout) {
   return layout;
 }
 
+async function generateLayoutId() {
+  await ensureDir(layoutsDir);
+
+  const entries = await fs.readdir(layoutsDir, { withFileTypes: true });
+  let maxIndex = 0;
+
+  entries.forEach((entry) => {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      return;
+    }
+
+    const match = entry.name.match(/^layout-(\d+)\.json$/);
+
+    if (!match) {
+      return;
+    }
+
+    const index = Number.parseInt(match[1], 10);
+
+    if (Number.isInteger(index) && index > maxIndex) {
+      maxIndex = index;
+    }
+  });
+
+  return `layout-${maxIndex + 1}`;
+}
+
+async function duplicateLayout(sourceLayoutId) {
+  const layout = await readLayout(sourceLayoutId);
+
+  if (!layout) {
+    return null;
+  }
+
+  const targetLayoutId = await generateLayoutId();
+  const duplicatedLayout = {
+    ...layout,
+    description: layout.description
+      ? `copy of ${layout.description}`
+      : `copy of ${layout.layoutId}`,
+    layoutId: targetLayoutId
+  };
+
+  await writeLayout(targetLayoutId, duplicatedLayout);
+
+  return duplicatedLayout;
+}
+
+async function deleteLayout(layoutId) {
+  const layoutRecord = await readLayoutRecord(layoutId);
+
+  if (!layoutRecord) {
+    return false;
+  }
+
+  const deviceCodes = await listDeviceCodes();
+
+  await Promise.all(
+    deviceCodes.map(async (deviceCode) => {
+      const device = await readDevice(deviceCode);
+
+      if (!device || device.layoutId !== layoutId) {
+        return;
+      }
+
+      await updateDevice(deviceCode, {
+        layoutId: undefined
+      });
+    })
+  );
+
+  await deleteJsonFile(path.join(layoutsDir, `${layoutId}.json`));
+  return true;
+}
+
 async function createAdminDevice({ layoutId } = {}) {
   const deviceCode = await generateUniqueDeviceCode();
 
@@ -717,6 +792,11 @@ async function listLayouts() {
         return {
           boxCount: layoutRecord.boxCount,
           boxes: layoutRecord.boxes,
+          description:
+            layoutRecord.layout &&
+            typeof layoutRecord.layout.description === "string"
+              ? layoutRecord.layout.description
+              : undefined,
           errors: layoutRecord.errors,
           isNeutralPreview: layoutRecord.isNeutralPreview,
           layoutId: layoutRecord.layoutId || fallbackLayoutId,
@@ -747,6 +827,8 @@ module.exports = {
   assignPairedActiveClient,
   createAdminDevice,
   createPendingDevice,
+  deleteLayout,
+  duplicateLayout,
   deleteDevice,
   generateDeviceCode,
   generateUniqueDeviceCode,

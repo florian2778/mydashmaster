@@ -16,6 +16,8 @@ const {
 const {
   activateDeviceClient,
   createAdminDevice,
+  deleteLayout,
+  duplicateLayout,
   deleteDevice,
   listDevices,
   listLayouts,
@@ -170,12 +172,18 @@ function getOverviewStateLabel(overviewState) {
   return labels[overviewState] || "Not activated";
 }
 
-function getOverviewSecondaryLine(device, overviewState) {
+function getOverviewSecondaryMeta(device, overviewState) {
   if (overviewState === "online" || overviewState === "offline") {
-    return `Seen ${formatRelativeSeen(device.lastStatusAt)}`;
+    return {
+      label: "Seen",
+      value: formatRelativeSeen(device.lastStatusAt)
+    };
   }
 
-  return `Last access: ${formatAbsoluteOverviewTimestamp(device.lastConnectedAt)}`;
+  return {
+    label: "Last access",
+    value: formatAbsoluteOverviewTimestamp(device.lastConnectedAt)
+  };
 }
 
 async function mapDeviceCard(device) {
@@ -224,7 +232,8 @@ async function mapDeviceCard(device) {
     displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
     displayLastIp: device.lastKnownIp || "-",
     displayLastSeen: formatRelativeSeen(device.lastStatusAt),
-    displaySecondaryLine: getOverviewSecondaryLine(device, overviewState),
+    displaySecondaryLabel: getOverviewSecondaryMeta(device, overviewState).label,
+    displaySecondaryValue: getOverviewSecondaryMeta(device, overviewState).value,
     displayTitle: device.description || device.deviceCode,
     lastConnectedAt: device.lastConnectedAt || null,
     lastStatusAt: device.lastStatusAt || null,
@@ -245,7 +254,8 @@ function buildDeviceOverviewPayload(devices) {
     devices: devices.map((device) => ({
       activeClientHeartbeatFresh: device.activeClientHeartbeatFresh,
       deviceCode: device.deviceCode,
-      displaySecondaryLine: device.displaySecondaryLine,
+      displaySecondaryLabel: device.displaySecondaryLabel,
+      displaySecondaryValue: device.displaySecondaryValue,
       lastConnectedAt: device.lastConnectedAt,
       lastStatusAt: device.lastStatusAt,
       hasActiveClient: device.hasActiveClient,
@@ -332,7 +342,7 @@ function getLayoutVersionNote(layoutRecord) {
   return null;
 }
 
-function buildLayoutDraftValidation(layoutId, jsonContent) {
+function buildLayoutDraftValidation(jsonContent) {
   let parsedLayout = null;
   let parseError = null;
   let validation = {
@@ -346,10 +356,6 @@ function buildLayoutDraftValidation(layoutId, jsonContent) {
   } catch (error) {
     parseError = error.message;
     validation.errors.push(`Invalid JSON: ${error.message}`);
-  }
-
-  if (parsedLayout && parsedLayout.layoutId !== layoutId) {
-    validation.errors.push(`layoutId must remain "${layoutId}"`);
   }
 
   const status =
@@ -393,6 +399,7 @@ function getReadableLayoutJson(layoutRecord) {
 async function renderLayoutDetailPage(res, layoutId, options = {}) {
   const {
     editMode = false,
+    descriptionValue = null,
     draftResult = null,
     httpStatus = 200
   } = options;
@@ -416,6 +423,10 @@ async function renderLayoutDetailPage(res, layoutId, options = {}) {
   return res.status(httpStatus).render("pages/admin-layout-detail", {
     draftJsonContent:
       draftResult?.jsonContent || getReadableLayoutJson(layoutRecord),
+    descriptionValue:
+      typeof descriptionValue === "string"
+        ? descriptionValue
+        : layoutRecord.layout?.description || "",
     editMode,
     heading: "Layout Detail",
     layout: layoutRecord,
@@ -567,6 +578,8 @@ router.post("/layouts/:layoutId", async (req, res, next) => {
     const { layoutId } = req.params;
     const intent =
       typeof req.body?.intent === "string" ? req.body.intent : "validate";
+    const descriptionValue =
+      typeof req.body?.description === "string" ? req.body.description.trim() : "";
     const jsonContent =
       typeof req.body?.jsonContent === "string" ? req.body.jsonContent : "";
     const layoutRecord = await readLayoutRecord(layoutId);
@@ -580,14 +593,15 @@ router.post("/layouts/:layoutId", async (req, res, next) => {
     }
 
     if (intent === "cancel") {
-      return res.redirect(`/admin/layouts/${layoutId}`);
+      return res.redirect(`/admin/layouts/${encodeURIComponent(layoutId)}`);
     }
 
-    const draftResult = buildLayoutDraftValidation(layoutId, jsonContent);
+    const draftResult = buildLayoutDraftValidation(jsonContent);
 
     if (intent === "save") {
       if (draftResult.validation.errors.length > 0 || !draftResult.parsedLayout) {
         return renderLayoutDetailPage(res, layoutId, {
+          descriptionValue,
           draftResult,
           editMode: true,
           httpStatus: 400
@@ -600,17 +614,57 @@ router.post("/layouts/:layoutId", async (req, res, next) => {
 
       await writeLayout(layoutId, {
         ...draftResult.parsedLayout,
+        description: descriptionValue || undefined,
         layoutId,
         layoutVersion: nextLayoutVersion
       });
 
-      return res.redirect(`/admin/layouts/${layoutId}`);
+      return res.redirect(`/admin/layouts/${encodeURIComponent(layoutId)}`);
     }
 
     return renderLayoutDetailPage(res, layoutId, {
+      descriptionValue,
       draftResult,
       editMode: true
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/layouts/:layoutId/duplicate", async (req, res, next) => {
+  try {
+    const { layoutId } = req.params;
+    const duplicatedLayout = await duplicateLayout(layoutId);
+
+    if (!duplicatedLayout) {
+      return res.status(404).render("pages/admin-layout-not-found", {
+        heading: "Unknown layout",
+        layoutId,
+        pageTitle: "Unknown layout"
+      });
+    }
+
+    return res.redirect(`/admin/layouts/${encodeURIComponent(duplicatedLayout.layoutId)}?mode=edit`);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/layouts/:layoutId/delete", async (req, res, next) => {
+  try {
+    const { layoutId } = req.params;
+    const deleted = await deleteLayout(layoutId);
+
+    if (!deleted) {
+      return res.status(404).render("pages/admin-layout-not-found", {
+        heading: "Unknown layout",
+        layoutId,
+        pageTitle: "Unknown layout"
+      });
+    }
+
+    return res.redirect("/admin/layouts");
   } catch (error) {
     next(error);
   }

@@ -90,6 +90,47 @@ async function loginAsAdmin(baseUrl) {
 }
 
 test("layouts overview links to layout detail pages", async () => {
+  const layoutId = "layout-overview-description-test";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+
+  await removeIfExists(layoutFilePath);
+
+  try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Overview description",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
   await withAdminEnv(async () => {
     await withServer(async (baseUrl) => {
       const adminCookie = await loginAsAdmin(baseUrl);
@@ -103,8 +144,13 @@ test("layouts overview links to layout detail pages", async () => {
       assert.equal(response.status, 200);
       assert.match(body, /href="\/admin\/layouts\/layout-1"/);
       assert.match(body, /class="layout-overview-card"/);
+      assert.match(body, /Overview description/);
+      assert.match(body, /<code>layout-overview-description-test<\/code>/);
     });
   });
+  } finally {
+    await removeIfExists(layoutFilePath);
+  }
 });
 
 test("layout detail page shows read-only config and device usage", async () => {
@@ -169,6 +215,7 @@ test("layout detail page shows read-only config and device usage", async () => {
         const body = await response.text();
 
         assert.equal(response.status, 200);
+        assert.match(body, /layoutId: <strong>layout-usage-test<\/strong>/);
         assert.match(body, /layoutVersion: <strong>1<\/strong>/);
         assert.match(body, /Lobby screen/);
         assert.match(body, /layoutuse/);
@@ -229,6 +276,7 @@ test("layout detail validate and save workflow increments layoutVersion", async 
         const invalidValidateResponse = await fetch(`${baseUrl}/admin/layouts/${layoutId}`, {
           body: new URLSearchParams({
             intent: "validate",
+            description: "",
             jsonContent: "{\"layoutId\":\"layout-save-test\""
           }),
           headers: {
@@ -246,9 +294,11 @@ test("layout detail validate and save workflow increments layoutVersion", async 
         const saveResponse = await fetch(`${baseUrl}/admin/layouts/${layoutId}`, {
           body: new URLSearchParams({
             intent: "save",
+            description: "Updated split layout",
             jsonContent: JSON.stringify(
               {
-                layoutId,
+                description: "Should be overwritten",
+                layoutId: "changed-layout-id",
                 layoutVersion: 2,
                 options: {
                   showHeader: true,
@@ -293,10 +343,310 @@ test("layout detail validate and save workflow increments layoutVersion", async 
     const savedLayout = JSON.parse(await fs.readFile(layoutFilePath, "utf8"));
 
     assert.equal(savedLayout.layoutVersion, 3);
+    assert.equal(savedLayout.layoutId, layoutId);
+    assert.equal(savedLayout.description, "Updated split layout");
     assert.equal(savedLayout.options.showHeader, true);
     assert.equal(savedLayout.boxes[0].url, "https://example.org");
   } finally {
     await removeIfExists(layoutFilePath);
+  }
+});
+
+test("layout detail duplicate creates a full copy with generated name", async () => {
+  const layoutId = "layout-duplicate-test";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+
+  await removeIfExists(layoutFilePath);
+
+  try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "North lobby",
+          layoutId,
+          layoutVersion: 4,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/copy-me",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(
+          `${baseUrl}/admin/layouts/${encodeURIComponent(layoutId)}/duplicate`,
+          {
+            headers: {
+              cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(response.status, 302);
+        const location = response.headers.get("location");
+        const duplicateLayoutId = decodeURIComponent(
+          location.replace(/^\/admin\/layouts\//, "").replace(/\?mode=edit$/, "")
+        );
+        const duplicateLayoutFilePath = path.join(layoutsDir, `${duplicateLayoutId}.json`);
+        const duplicatedLayout = JSON.parse(await fs.readFile(duplicateLayoutFilePath, "utf8"));
+
+        assert.match(location, /^\/admin\/layouts\/layout-\d+\?mode=edit$/);
+        assert.notEqual(duplicateLayoutId, layoutId);
+        assert.equal(duplicatedLayout.layoutId, duplicateLayoutId);
+        assert.equal(duplicatedLayout.description, "copy of North lobby");
+        assert.equal(duplicatedLayout.layoutVersion, 4);
+        assert.deepEqual(duplicatedLayout.options, {
+          showHeader: false,
+          showLayoutTitle: false,
+          showStatus: false
+        });
+        assert.deepEqual(duplicatedLayout.structure, {
+          type: "row",
+          children: [
+            {
+              type: "box",
+              box: "box1",
+              size: "100%"
+            }
+          ]
+        });
+        assert.deepEqual(duplicatedLayout.boxes, [
+          {
+            name: "box1",
+            url: "https://example.com/copy-me",
+            zoom: 1
+          }
+        ]);
+
+        await removeIfExists(duplicateLayoutFilePath);
+      });
+    });
+  } finally {
+    await removeIfExists(layoutFilePath);
+  }
+});
+
+test("layout detail delete removes the layout and clears assigned devices", async () => {
+  const layoutId = "layout-delete-test";
+  const deviceCode = "layoutdel";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+
+  await removeIfExists(layoutFilePath);
+  await removeIfExists(deviceFilePath);
+
+  try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Delete me",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/delete-me",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await writeDevice(deviceCode, {
+      description: "Assigned device",
+      deviceCode,
+      layoutId,
+      status: "approved"
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(
+          `${baseUrl}/admin/layouts/${encodeURIComponent(layoutId)}/delete`,
+          {
+            headers: {
+              cookie: adminCookie
+            },
+            method: "POST",
+            redirect: "manual"
+          }
+        );
+
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get("location"), "/admin/layouts");
+      });
+    });
+
+    await assert.rejects(fs.readFile(layoutFilePath, "utf8"), /ENOENT/);
+    const updatedDevice = JSON.parse(await fs.readFile(deviceFilePath, "utf8"));
+    assert.equal(updatedDevice.layoutId, undefined);
+  } finally {
+    await removeIfExists(layoutFilePath);
+    await removeIfExists(deviceFilePath);
+  }
+});
+
+test("layout detail edit updates description and keeps layoutId stable", async () => {
+  const layoutId = "layout-rename-test";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+  const deviceCode = "layoutrename";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+
+  await removeIfExists(layoutFilePath);
+  await removeIfExists(deviceFilePath);
+
+  try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Original layout description",
+          layoutId,
+          layoutVersion: 2,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/original",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await writeDevice(deviceCode, {
+      deviceCode,
+      layoutId,
+      status: "approved"
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const response = await fetch(`${baseUrl}/admin/layouts/${encodeURIComponent(layoutId)}`, {
+          body: new URLSearchParams({
+            intent: "save",
+            description: "Updated description",
+            jsonContent: JSON.stringify(
+              {
+                description: "JSON description should be ignored",
+                layoutId: "renamed-layout-id",
+                layoutVersion: 2,
+                options: {
+                  showHeader: true,
+                  showLayoutTitle: false,
+                  showStatus: false
+                },
+                structure: {
+                  type: "row",
+                  children: [
+                    {
+                      type: "box",
+                      box: "box1",
+                      size: "100%"
+                    }
+                  ]
+                },
+                boxes: [
+                  {
+                    name: "box1",
+                    url: "https://example.com/renamed",
+                    zoom: 1
+                  }
+                ]
+              },
+              null,
+              2
+            )
+          }),
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            cookie: adminCookie
+          },
+          method: "POST",
+          redirect: "manual"
+        });
+
+        assert.equal(response.status, 302);
+        assert.equal(response.headers.get("location"), `/admin/layouts/${encodeURIComponent(layoutId)}`);
+      });
+    });
+
+    const updatedLayout = JSON.parse(await fs.readFile(layoutFilePath, "utf8"));
+    const updatedDevice = JSON.parse(await fs.readFile(deviceFilePath, "utf8"));
+
+    assert.equal(updatedLayout.layoutId, layoutId);
+    assert.equal(updatedLayout.description, "Updated description");
+    assert.equal(updatedLayout.layoutVersion, 3);
+    assert.equal(updatedLayout.options.showHeader, true);
+    assert.equal(updatedLayout.boxes[0].url, "https://example.com/renamed");
+    assert.equal(updatedDevice.layoutId, layoutId);
+  } finally {
+    await removeIfExists(layoutFilePath);
+    await removeIfExists(deviceFilePath);
   }
 });
 
