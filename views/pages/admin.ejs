@@ -10,16 +10,16 @@
   </header>
 
   <section class="admin-home-grid">
-    <a class="admin-home-card" href="/admin/devices">
-      <span class="admin-home-card__label">Devices</span>
-      <strong class="admin-home-card__count"><%= deviceCount %></strong>
-      <span class="admin-home-card__meta">Registered device<%= deviceCount === 1 ? "" : "s" %></span>
-    </a>
-
     <a class="admin-home-card" href="/admin/layouts">
       <span class="admin-home-card__label">Layouts</span>
       <strong class="admin-home-card__count"><%= layoutCount %></strong>
       <span class="admin-home-card__meta">Available layout<%= layoutCount === 1 ? "" : "s" %></span>
+    </a>
+
+    <a class="admin-home-card" href="/admin/devices">
+      <span class="admin-home-card__label">Devices</span>
+      <strong class="admin-home-card__count"><%= deviceCount %></strong>
+      <span class="admin-home-card__meta">Registered device<%= deviceCount === 1 ? "" : "s" %></span>
     </a>
   </section>
 </section>
