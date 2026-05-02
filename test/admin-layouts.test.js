@@ -153,6 +153,62 @@ test("layouts overview links to layout detail pages", async () => {
   }
 });
 
+test("layouts overview can create a new layout and opens it in edit mode", async () => {
+  await withAdminEnv(async () => {
+    await withServer(async (baseUrl) => {
+      const adminCookie = await loginAsAdmin(baseUrl);
+      const response = await fetch(`${baseUrl}/admin/layouts/create`, {
+        headers: {
+          cookie: adminCookie
+        },
+        method: "POST",
+        redirect: "manual"
+      });
+
+      assert.equal(response.status, 302);
+
+      const location = response.headers.get("location");
+      assert.match(location, /^\/admin\/layouts\/[a-z0-9]{6}\?mode=edit$/);
+
+      const layoutId = decodeURIComponent(
+        location.replace(/^\/admin\/layouts\//, "").replace(/\?mode=edit$/, "")
+      );
+      const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+
+      try {
+        const createdLayout = JSON.parse(await fs.readFile(layoutFilePath, "utf8"));
+
+        assert.equal(createdLayout.layoutId, layoutId);
+        assert.equal(createdLayout.layoutVersion, 1);
+        assert.deepEqual(createdLayout.options, {
+          showHeader: false,
+          showStatus: false,
+          showLayoutTitle: false
+        });
+        assert.deepEqual(createdLayout.structure, {
+          type: "row",
+          children: [
+            {
+              type: "box",
+              box: "box1",
+              size: "100%"
+            }
+          ]
+        });
+        assert.deepEqual(createdLayout.boxes, [
+          {
+            name: "box1",
+            url: "",
+            zoom: 1
+          }
+        ]);
+      } finally {
+        await removeIfExists(layoutFilePath);
+      }
+    });
+  });
+});
+
 test("layout detail page shows read-only config and device usage", async () => {
   const layoutId = "layout-usage-test";
   const deviceCode = "layoutuse";
@@ -416,8 +472,9 @@ test("layout detail duplicate creates a full copy with generated name", async ()
         const duplicateLayoutFilePath = path.join(layoutsDir, `${duplicateLayoutId}.json`);
         const duplicatedLayout = JSON.parse(await fs.readFile(duplicateLayoutFilePath, "utf8"));
 
-        assert.match(location, /^\/admin\/layouts\/layout-\d+\?mode=edit$/);
+        assert.match(location, /^\/admin\/layouts\/[a-z0-9]{6}\?mode=edit$/);
         assert.notEqual(duplicateLayoutId, layoutId);
+        assert.match(duplicateLayoutId, /^[a-z0-9]{6}$/);
         assert.equal(duplicatedLayout.layoutId, duplicateLayoutId);
         assert.equal(duplicatedLayout.description, "copy of North lobby");
         assert.equal(duplicatedLayout.layoutVersion, 4);
@@ -586,6 +643,20 @@ test("layout detail edit updates description and keeps layoutId stable", async (
     await withAdminEnv(async () => {
       await withServer(async (baseUrl) => {
         const adminCookie = await loginAsAdmin(baseUrl);
+        const editResponse = await fetch(
+          `${baseUrl}/admin/layouts/${encodeURIComponent(layoutId)}?mode=edit`,
+          {
+            headers: {
+              cookie: adminCookie
+            }
+          }
+        );
+        const editBody = await editResponse.text();
+
+        assert.equal(editResponse.status, 200);
+        assert.match(editBody, /class="admin-layout-detail-title-input"/);
+        assert.doesNotMatch(editBody, /<label class="admin-layout-editor-label" for="description">/);
+
         const response = await fetch(`${baseUrl}/admin/layouts/${encodeURIComponent(layoutId)}`, {
           body: new URLSearchParams({
             intent: "save",

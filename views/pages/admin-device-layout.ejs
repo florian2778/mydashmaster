@@ -17,7 +17,7 @@
       <h2>Current Device</h2>
       <p class="admin-layouts-subtitle">
         Status: <strong><%= device.status %></strong>
-        · Current layout: <strong><%= device.layoutId || "none" %></strong>
+        · Current layout: <strong><%= currentLayoutDisplayName %></strong>
       </p>
     </div>
 
@@ -32,7 +32,7 @@
           <option value="" <%= !device.layoutId ? "selected" : "" %>>No layout assigned</option>
           <% layouts.forEach((layout) => { %>
             <option value="<%= layout.layoutId %>" <%= layout.layoutId === device.layoutId ? "selected" : "" %>>
-              <%= layout.layoutId %>
+              <%= layout.displayName %>
             </option>
           <% }) %>
         </select>

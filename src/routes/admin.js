@@ -16,6 +16,7 @@ const {
 const {
   activateDeviceClient,
   createAdminDevice,
+  createLayout,
   deleteLayout,
   duplicateLayout,
   deleteDevice,
@@ -161,6 +162,21 @@ function shortenClientId(value) {
   return value.length <= 8 ? value : `${value.slice(0, 8)}...`;
 }
 
+function getLayoutDisplayName(layout) {
+  if (!layout) {
+    return "none";
+  }
+
+  return layout.description || layout.layoutId || "none";
+}
+
+function mapAssignableLayouts(layouts) {
+  return getAssignableLayouts(layouts).map((layout) => ({
+    ...layout,
+    displayName: getLayoutDisplayName(layout)
+  }));
+}
+
 function getOverviewStateLabel(overviewState) {
   const labels = {
     activatable: "Not activated",
@@ -186,7 +202,7 @@ function getOverviewSecondaryMeta(device, overviewState) {
   };
 }
 
-async function mapDeviceCard(device) {
+async function mapDeviceCard(device, layoutLookup = new Map()) {
   const deviceAuth = await readDeviceAuth(device.deviceCode);
   const effectiveDeviceAuth = {
     clients: device.clients,
@@ -231,6 +247,9 @@ async function mapDeviceCard(device) {
     devicePublicUrl: `/d/${device.deviceCode}`,
     displayLastAccessDate: formatDateOnly(device.lastConnectedAt),
     displayLastIp: device.lastKnownIp || "-",
+    displayLayoutName: device.layoutId
+      ? getLayoutDisplayName(layoutLookup.get(device.layoutId) || { layoutId: device.layoutId })
+      : "none",
     displayLastSeen: formatRelativeSeen(device.lastStatusAt),
     displaySecondaryLabel: getOverviewSecondaryMeta(device, overviewState).label,
     displaySecondaryValue: getOverviewSecondaryMeta(device, overviewState).value,
@@ -246,7 +265,9 @@ async function mapDeviceCard(device) {
 }
 
 async function buildDeviceOverviewCards(devices) {
-  return Promise.all(devices.map((device) => mapDeviceCard(device)));
+  const layouts = await listLayouts();
+  const layoutLookup = new Map(layouts.map((layout) => [layout.layoutId, layout]));
+  return Promise.all(devices.map((device) => mapDeviceCard(device, layoutLookup)));
 }
 
 function buildDeviceOverviewPayload(devices) {
@@ -285,6 +306,11 @@ function buildClientDisplay(device, deviceAuth, client) {
 }
 
 async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options = {}) {
+  const assignableLayouts = mapAssignableLayouts(layouts);
+  const currentLayout =
+    device.layoutId
+      ? assignableLayouts.find((layout) => layout.layoutId === device.layoutId) || null
+      : null;
   const activeClient = getPairedClient(deviceAuth);
   const additionalClients = Array.isArray(device.clients)
     ? device.clients
@@ -295,9 +321,12 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
 
   return {
     actionErrorMessage: options.actionErrorMessage || null,
-    assignableLayouts: getAssignableLayouts(layouts),
+    assignableLayouts,
     device: {
       ...overviewDevice,
+      currentLayoutDisplayName: currentLayout
+        ? currentLayout.displayName
+        : device.layoutId || "none",
       displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
       displayOfficialSeenAbsolute: formatAbsoluteTimestamp(device.lastStatusAt),
       displayActivationState:
@@ -469,7 +498,10 @@ async function renderDeviceDetailPage(res, deviceCode, options = {}) {
 
   return res.status(httpStatus).render(
     "pages/admin-device-detail",
-    await buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })
+    {
+      ...(await buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })),
+      detailPollIntervalMs: 4000
+    }
   );
 }
 
@@ -555,6 +587,17 @@ router.get("/layouts", async (req, res, next) => {
       heading: "Layouts",
       layouts
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/layouts/create", async (req, res, next) => {
+  try {
+    const layout = await createLayout();
+    return res.redirect(
+      `/admin/layouts/${encodeURIComponent(layout.layoutId)}?mode=edit`
+    );
   } catch (error) {
     next(error);
   }
@@ -673,7 +716,7 @@ router.post("/layouts/:layoutId/delete", async (req, res, next) => {
 router.get("/devices", async (req, res, next) => {
   try {
     const [devices, layouts] = await Promise.all([listDevices(), listLayouts()]);
-    const assignableLayouts = getAssignableLayouts(layouts);
+    const assignableLayouts = mapAssignableLayouts(layouts);
     const overviewDevices = await buildDeviceOverviewCards(devices);
 
     res.render("pages/admin-devices", {
@@ -729,16 +772,16 @@ router.post("/devices", async (req, res, next) => {
         return res.status(400).render("pages/admin-devices", {
           devices: existingDevices,
           heading: "Devices",
-          layouts: assignableLayouts,
+          layouts: mapAssignableLayouts(assignableLayouts),
           pageTitle: "Devices",
           overviewPollIntervalMs: 4000
         });
       }
     }
 
-    await createAdminDevice({ layoutId });
+    const createdDevice = await createAdminDevice({ layoutId });
 
-    res.redirect("/admin/devices");
+    res.redirect(`/admin/devices/${createdDevice.deviceCode}`);
   } catch (error) {
     next(error);
   }
@@ -761,9 +804,15 @@ router.get("/devices/:deviceCode/layout", async (req, res, next) => {
 
     res.render("pages/admin-device-layout", {
       device,
+      currentLayoutDisplayName: device.layoutId
+        ? getLayoutDisplayName(
+          getAssignableLayouts(layouts).find((layout) => layout.layoutId === device.layoutId)
+            || { layoutId: device.layoutId }
+        )
+        : "none",
       errorMessage: null,
       heading: "Assign Layout",
-      layouts: getAssignableLayouts(layouts),
+      layouts: mapAssignableLayouts(layouts),
       pageTitle: `Assign layout for ${deviceCode}`
     });
   } catch (error) {
@@ -800,9 +849,15 @@ router.post("/devices/:deviceCode/layout", async (req, res, next) => {
       if (!hasLayout) {
         return res.status(400).render("pages/admin-device-layout", {
           device,
+          currentLayoutDisplayName: device.layoutId
+            ? getLayoutDisplayName(
+              assignableLayouts.find((layout) => layout.layoutId === device.layoutId)
+                || { layoutId: device.layoutId }
+            )
+            : "none",
           errorMessage: "Selected layout is not available.",
           heading: "Assign Layout",
-          layouts: assignableLayouts,
+          layouts: mapAssignableLayouts(assignableLayouts),
           pageTitle: `Assign layout for ${deviceCode}`
         });
       }

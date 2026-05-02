@@ -26,7 +26,7 @@
         <select name="layoutId">
           <option value="">No layout assigned</option>
           <% layouts.forEach((layout) => { %>
-            <option value="<%= layout.layoutId %>"><%= layout.layoutId %></option>
+            <option value="<%= layout.layoutId %>"><%= layout.displayName %></option>
           <% }) %>
         </select>
       </label>
@@ -62,19 +62,27 @@
           </div>
 
           <div class="device-overview-statusline">
-            <span
-              class="device-overview-status-bubble device-overview-status-bubble--<%= device.overviewState %>"
-              aria-hidden="true"
-            ></span>
-            <span
-              class="device-overview-status-text"
-              data-role="status-text"
-            ><%= device.overviewStateLabel %></span>
+            <div class="device-overview-status-block">
+              <p class="device-overview-status-label">Overall Status</p>
+              <div class="device-overview-status-main">
+                <span
+                  class="device-overview-status-bubble device-overview-status-bubble--<%= device.overviewState %>"
+                  aria-hidden="true"
+                ></span>
+                <span
+                  class="device-overview-status-text"
+                  data-role="status-text"
+                ><%= device.overviewStateLabel %></span>
+              </div>
+            </div>
+            <div class="device-overview-secondary">
+              <p class="device-overview-secondary-label" data-role="secondary-label"><%= device.displaySecondaryLabel %></p>
+              <p class="device-overview-secondary-value" data-role="secondary-value"><%= device.displaySecondaryValue %></p>
+            </div>
           </div>
 
           <div class="device-overview-details">
-            <p class="device-overview-layout">Layout: <strong><%= device.layoutId || "none" %></strong></p>
-            <p class="device-overview-secondary" data-role="secondary-line"><%= device.displaySecondaryLine %></p>
+            <p class="device-overview-layout">Layout: <strong><%= device.displayLayoutName %></strong></p>
           </div>
         </article>
       <% }) %>
@@ -85,8 +93,7 @@
 <% if (devices.length > 0) { %>
   <script>
     (() => {
-      const pollIntervalMs = <%- JSON.stringify(overviewPollIntervalMs) %>;
-      const localUpdateIntervalMs = 1000;
+      const pollIntervalMs = <%- JSON.stringify(15000) %>;
       const cards = Array.from(document.querySelectorAll("[data-device-code]"));
 
       if (cards.length === 0) {
@@ -96,60 +103,6 @@
       const cardByDeviceCode = new Map(
         cards.map((card) => [card.getAttribute("data-device-code"), card])
       );
-
-      function formatRelativeSeen(timestamp) {
-        if (!timestamp) {
-          return "Seen -";
-        }
-
-        const date = new Date(timestamp);
-
-        if (Number.isNaN(date.getTime())) {
-          return "Seen -";
-        }
-
-        const diffSeconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-
-        if (diffSeconds < 5) {
-          return "Seen just now";
-        }
-
-        if (diffSeconds < 60) {
-          return `Seen ${diffSeconds}s ago`;
-        }
-
-        const diffMinutes = Math.floor(diffSeconds / 60);
-
-        if (diffMinutes < 60) {
-          return `Seen ${diffMinutes}m ago`;
-        }
-
-        const diffHours = Math.floor(diffMinutes / 60);
-
-        if (diffHours < 24) {
-          return `Seen ${diffHours}h ago`;
-        }
-
-        const diffDays = Math.floor(diffHours / 24);
-        return `Seen ${diffDays}d ago`;
-      }
-
-      function updateRelativeTime(card) {
-        const state = card.dataset.overviewState;
-        const secondaryLine = card.querySelector('[data-role="secondary-line"]');
-
-        if (!secondaryLine) {
-          return;
-        }
-
-        if (state === "online" || state === "offline") {
-          secondaryLine.textContent = formatRelativeSeen(card.dataset.lastStatusAt || "");
-        }
-      }
-
-      function updateAllRelativeTimes() {
-        cards.forEach((card) => updateRelativeTime(card));
-      }
 
       function applyCardUpdate(card, device) {
         const previousState = card.dataset.overviewState;
@@ -178,13 +131,11 @@
           statusText.textContent = device.overviewStateLabel;
         }
 
-        const secondaryLine = card.querySelector('[data-role="secondary-line"]');
-        if (secondaryLine) {
-          if (nextState === "online" || nextState === "offline") {
-            secondaryLine.textContent = formatRelativeSeen(device.lastStatusAt || "");
-          } else {
-            secondaryLine.textContent = device.displaySecondaryLine;
-          }
+        const secondaryLabel = card.querySelector('[data-role="secondary-label"]');
+        const secondaryValue = card.querySelector('[data-role="secondary-value"]');
+        if (secondaryLabel && secondaryValue) {
+          secondaryLabel.textContent = device.displaySecondaryLabel;
+          secondaryValue.textContent = device.displaySecondaryValue;
         }
       }
 
@@ -219,9 +170,7 @@
         }
       }
 
-      updateAllRelativeTimes();
       window.setInterval(refreshOverview, pollIntervalMs);
-      window.setInterval(updateAllRelativeTimes, localUpdateIntervalMs);
     })();
   </script>
 <% } %>

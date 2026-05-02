@@ -173,7 +173,11 @@ Keine Pflichtänderung notwendig, aber optional sinnvoll:
 Bearbeitung und Analyse eines Layouts
 
 ### Ziel-UI
-- `layoutId`
+- primärer Titel:
+  - `description`, falls vorhanden
+  - sonst `layoutId`
+- sichtbarer technischer Verweis:
+  - `layoutId`
 - Liste der Devices, die dieses Layout nutzen
 - JSON-Konfiguration
 
@@ -181,11 +185,40 @@ Bearbeitung und Analyse eines Layouts
 - Bearbeiten (Edit-Modus)
 - Prüfen (Validierung)
 - Speichern
+- Duplizieren
 
 ### Anforderungen
 - JSON sauber formatiert
 - klare Fehlermeldungen
 - kein Speichern bei invalidem Zustand
+- `layoutId` bleibt technisch stabil und sichtbar
+- nur `description` ist als Name manuell editierbar
+- JSON-Speichern darf `layoutId` nicht umbenennen
+
+### Edit-Modell
+
+- `layoutId`
+  - immutable technische Kennung
+  - sichtbar im Detail
+  - nicht manuell editierbar
+- `description`
+  - editierbares Textfeld im Detail
+  - dient als human-readable Name
+
+### Duplicate-Verhalten
+
+- Aktion: `Duplicate`
+- Ergebnis:
+  - neue Layout-Datei mit neu generiertem `layoutId`
+    - 6 Zeichen
+    - nur `a-z` und `0-9`
+    - kein Prefix
+    - zufällig generiert
+    - auf Eindeutigkeit geprüft
+  - vollständige Kopie des Layout-Inhalts
+  - neue `description`:
+    - `copy of <alte description>`, falls vorhanden
+    - sonst `copy of <altes layoutId>`
 
 ### Konflikt / Lücke
 
@@ -204,6 +237,8 @@ Um dieses Ziel konsistent zu machen, sollten folgende Ergänzungen vorgenommen w
     - Admin kann Layout-JSON laden
     - Admin kann Layout validieren
     - Persistenz erfolgt in `data/layouts/{layoutId}.json`
+    - `layoutId` bleibt stabil
+    - `description` ist editierbar
 - optional `docs/data-model.md`
   - ergänzen:
     - Speichern ist nur bei erfolgreicher Validierung erlaubt

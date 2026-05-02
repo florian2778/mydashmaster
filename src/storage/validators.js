@@ -340,6 +340,14 @@ function validateLayout(layout) {
     result.errors.push("Invalid layout: layoutId must be a string");
   }
 
+  if (
+    layout.description !== undefined &&
+    layout.description !== null &&
+    typeof layout.description !== "string"
+  ) {
+    result.errors.push("Invalid layout: description must be a string");
+  }
+
   if (layout.layoutVersion === undefined) {
     result.errors.push("Invalid layout: layoutVersion is required");
   } else if (!Number.isInteger(layout.layoutVersion)) {

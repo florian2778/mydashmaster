@@ -4,7 +4,19 @@
   <header class="admin-layout-detail-header">
     <div class="admin-layout-detail-heading">
       <div class="admin-layout-detail-titleline">
-        <h1><%= (layout.layout && layout.layout.description) || layout.layoutId %></h1>
+        <% if (editMode) { %>
+          <input
+            id="description"
+            class="admin-layout-detail-title-input"
+            name="description"
+            type="text"
+            value="<%= descriptionValue %>"
+            placeholder="<%= layout.layoutId %>"
+            form="layout-editor-form"
+          >
+        <% } else { %>
+          <h1><%= (layout.layout && layout.layout.description) || layout.layoutId %></h1>
+        <% } %>
         <span class="layout-status layout-status--<%= validationStatus %>">
           <%= validationStatus %>
         </span>
@@ -93,9 +105,12 @@
     </div>
 
     <% if (editMode) { %>
-      <form action="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>" method="post" class="admin-layout-editor-form">
-        <label class="admin-layout-editor-label" for="description">Description</label>
-        <input id="description" name="description" type="text" value="<%= descriptionValue %>">
+      <form
+        id="layout-editor-form"
+        action="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>"
+        method="post"
+        class="admin-layout-editor-form"
+      >
         <label class="admin-layout-editor-label" for="jsonContent">Layout JSON</label>
         <textarea id="jsonContent" name="jsonContent" class="admin-layout-editor"><%= draftJsonContent %></textarea>
         <div class="admin-layout-editor-actions">

@@ -6,6 +6,7 @@ This document defines the JSON structure used by MyDashmaster.
 
 A layout consists of:
 - layoutId
+- description
 - layoutVersion
 - options (optional)
 - structure
@@ -197,10 +198,28 @@ Path: data/layouts/{layoutId}.json
 
 Fields:
 - layoutId (string)
+- description (string, optional)
 - layoutVersion (integer)
 - options (object, optional)
 - structure (object)
 - boxes (array)
+
+`layoutId` meaning:
+- immutable technical identifier of the layout
+- used for:
+  - file path `data/layouts/{layoutId}.json`
+  - admin detail route `/admin/layouts/{layoutId}`
+  - device assignment references
+  - runtime layout identity together with `layoutVersion`
+- shown in the admin UI for reference and linking
+- not manually edited after creation
+
+`description` meaning:
+- human-readable layout label for admin use
+- optional
+- editable in layout detail edit mode
+- preferred display name in the admin UI when present
+- does not affect routing, device assignments, or runtime identity
 
 `layoutVersion` meaning:
 - monotonically increasing version number for the layout definition
@@ -210,7 +229,8 @@ Fields:
 Example:
 
 {
-  "layoutId": "layout-1",
+  "layoutId": "a1b2c3",
+  "description": "North lobby split",
   "layoutVersion": 3,
   "options": {
     "showHeader": false,
@@ -220,6 +240,25 @@ Example:
   "structure": {},
   "boxes": []
 }
+
+Creation and duplication rules:
+- new layouts receive a generated `layoutId`
+  - exactly 6 characters
+  - characters allowed: `a-z` and `0-9`
+  - no prefix
+  - generated randomly
+  - uniqueness is checked before the id is accepted
+  - existing older layout ids may keep their previous format
+- duplication creates:
+  - a fresh generated `layoutId`
+  - a full copy of the layout content
+  - `description = "copy of <old description>"` if the source had a description
+  - otherwise `description = "copy of <old layoutId>"`
+
+Edit rules:
+- `layoutId` remains fixed for the same logical layout
+- `description` may be changed independently
+- editing JSON must not change the stored `layoutId`
 
 ---
 

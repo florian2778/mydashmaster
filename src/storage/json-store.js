@@ -15,6 +15,8 @@ const deviceAuthDir = path.join(dataRoot, "device-auth");
 const layoutsDir = path.join(dataRoot, "layouts");
 const DEVICE_CODE_LENGTH = 8;
 const DEVICE_CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
+const LAYOUT_ID_LENGTH = 6;
+const LAYOUT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const CLIENT_RETENTION_MS = 48 * 60 * 60 * 1000;
 
 async function ensureDir(dirPath) {
@@ -424,31 +426,33 @@ async function writeLayout(layoutId, layout) {
   return layout;
 }
 
+function generateRandomLayoutId() {
+  let value = "";
+
+  for (let index = 0; index < LAYOUT_ID_LENGTH; index += 1) {
+    value += LAYOUT_ID_ALPHABET[crypto.randomInt(LAYOUT_ID_ALPHABET.length)];
+  }
+
+  return value;
+}
+
 async function generateLayoutId() {
   await ensureDir(layoutsDir);
 
-  const entries = await fs.readdir(layoutsDir, { withFileTypes: true });
-  let maxIndex = 0;
+  while (true) {
+    const layoutId = generateRandomLayoutId();
+    const filePath = path.join(layoutsDir, `${layoutId}.json`);
 
-  entries.forEach((entry) => {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) {
-      return;
+    try {
+      await fs.access(filePath);
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return layoutId;
+      }
+
+      throw error;
     }
-
-    const match = entry.name.match(/^layout-(\d+)\.json$/);
-
-    if (!match) {
-      return;
-    }
-
-    const index = Number.parseInt(match[1], 10);
-
-    if (Number.isInteger(index) && index > maxIndex) {
-      maxIndex = index;
-    }
-  });
-
-  return `layout-${maxIndex + 1}`;
+  }
 }
 
 async function duplicateLayout(sourceLayoutId) {
@@ -470,6 +474,40 @@ async function duplicateLayout(sourceLayoutId) {
   await writeLayout(targetLayoutId, duplicatedLayout);
 
   return duplicatedLayout;
+}
+
+async function createLayout() {
+  const layoutId = await generateLayoutId();
+  const layout = {
+    layoutId,
+    layoutVersion: 1,
+    options: {
+      showHeader: false,
+      showStatus: false,
+      showLayoutTitle: false
+    },
+    structure: {
+      type: "row",
+      children: [
+        {
+          type: "box",
+          box: "box1",
+          size: "100%"
+        }
+      ]
+    },
+    boxes: [
+      {
+        name: "box1",
+        url: "",
+        zoom: 1
+      }
+    ]
+  };
+
+  await writeLayout(layoutId, layout);
+
+  return layout;
 }
 
 async function deleteLayout(layoutId) {
@@ -826,6 +864,7 @@ module.exports = {
   activateDeviceClient,
   assignPairedActiveClient,
   createAdminDevice,
+  createLayout,
   createPendingDevice,
   deleteLayout,
   duplicateLayout,

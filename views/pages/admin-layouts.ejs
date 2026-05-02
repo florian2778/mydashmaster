@@ -6,7 +6,12 @@
       <h1><%= heading %></h1>
       <p class="admin-layouts-subtitle">Existing layouts with validation state and structure preview.</p>
     </div>
-    <a class="admin-secondary-link" href="/admin">Back to admin</a>
+    <div class="admin-layout-detail-actions">
+      <a class="admin-secondary-link" href="/admin">Back to admin</a>
+      <form action="/admin/layouts/create" method="post">
+        <button class="admin-action-button" type="submit">New layout</button>
+      </form>
+    </div>
   </header>
 
   <% if (layouts.length === 0) { %>
@@ -14,7 +19,7 @@
   <% } else { %>
     <section class="layout-overview-list">
       <% layouts.forEach((layout) => { %>
-        <a class="layout-overview-card" href="/admin/layouts/<%= layout.layoutId %>">
+        <a class="layout-overview-card" href="/admin/layouts/<%= encodeURIComponent(layout.layoutId) %>">
           <div class="layout-preview-shell<%= layout.isNeutralPreview ? ' layout-preview-shell--neutral' : '' %><%= layout.previewSummary.hasOverflow ? ' layout-preview-shell--overflow' : '' %>">
             <% if (layout.previewSummary.hasOverflow) { %>
               <span class="layout-preview-flag">Overflow</span>
@@ -29,7 +34,10 @@
           </div>
 
           <div class="layout-overview-meta">
-            <h2><%= layout.layoutId %></h2>
+            <h2><%= layout.description || layout.layoutId %></h2>
+            <% if (layout.description) { %>
+              <p class="admin-layouts-subtitle"><code><%= layout.layoutId %></code></p>
+            <% } %>
 
             <div class="layout-overview-facts">
               <span class="layout-status layout-status--<%= layout.status %>">

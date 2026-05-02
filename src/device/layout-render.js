@@ -61,6 +61,7 @@ async function buildDeviceLayoutViewModel(device) {
       hasBoxes: false,
       layoutExists: false,
       layoutId: null,
+      layoutLabel: null,
       options: defaultOptions,
       renderTree: null
     };
@@ -73,6 +74,7 @@ async function buildDeviceLayoutViewModel(device) {
       hasBoxes: false,
       layoutExists: false,
       layoutId: assignedLayoutId,
+      layoutLabel: assignedLayoutId,
       options: defaultOptions,
       renderTree: null
     };
@@ -82,6 +84,7 @@ async function buildDeviceLayoutViewModel(device) {
     hasBoxes: layout.boxes.length > 0,
     layoutExists: true,
     layoutId: assignedLayoutId,
+    layoutLabel: layout.description || assignedLayoutId,
     options: {
       ...defaultOptions,
       ...(layout.options || {})

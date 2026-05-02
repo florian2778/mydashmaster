@@ -1,6 +1,6 @@
 {
   "layoutId": "layout-4",
-  "layoutVersion": 1,
+  "layoutVersion": 5,
   "options": {
     "showHeader": false,
     "showStatus": false,
@@ -30,8 +30,9 @@
     },
     {
       "name": "box2",
-      "url": "http://10.250.250.204:8088",
-      "zoom": 1.5
+      "url": "https://ion01.ion.f8h.de/whoami",
+      "zoom": 0.7
     }
-  ]
+  ],
+  "description": "My first main layout"
 }

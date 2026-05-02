@@ -7,7 +7,7 @@
     <p>No layout assigned</p>
   <% } else { %>
     <% if (options.showLayoutTitle) { %>
-      <p>Layout: <%= layoutId %></p>
+      <p>Layout: <%= layoutLabel || layoutId %></p>
     <% } %>
 
     <% if (!hasBoxes) { %>

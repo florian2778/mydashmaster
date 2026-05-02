@@ -17,6 +17,7 @@ const {
 
 const devicesDir = path.join(__dirname, "..", "data", "devices");
 const deviceAuthDir = path.join(__dirname, "..", "data", "device-auth");
+const layoutsDir = path.join(__dirname, "..", "data", "layouts");
 const adminEnvDefaults = {
   ADMIN_PASSWORD_HASH: hashAdminPassword("admin-pass"),
   ADMIN_SESSION_SECRET: "test-admin-session-secret",
@@ -533,14 +534,52 @@ test("admin device cards show formatted fields and filtered actions", async () =
   const deviceCode = "cardview1";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const layoutId = "card-layout";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
 
   await removeIfExists(deviceFilePath);
   await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(layoutFilePath);
 
   try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Operations board",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/card",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
     await writeDevice(deviceCode, {
       deviceCode,
-      layoutId: "layout-2",
+      layoutId,
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
@@ -571,8 +610,9 @@ test("admin device cards show formatted fields and filtered actions", async () =
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Layout: <strong>layout-2<\/strong>/);
-        assert.match(body, /Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
+        assert.match(body, /Layout: <strong>Operations board<\/strong>/);
+        assert.match(body, /device-overview-secondary-label"[^>]*>Seen</);
+        assert.match(body, /device-overview-secondary-value"[^>]*>(just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)</);
         assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
         assert.match(body, new RegExp(`href="/d/${deviceCode}"`));
         assert.match(body, /device-overview-status-bubble--online/);
@@ -586,6 +626,7 @@ test("admin device cards show formatted fields and filtered actions", async () =
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(layoutFilePath);
   }
 });
 
@@ -593,6 +634,8 @@ test("admin device detail page shows summary, official active client, and additi
   const deviceCode = "detail01";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const layoutId = "detail-layout";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
   const now = new Date();
   const lastConnectedAt = new Date(now.getTime() - 20 * 60 * 1000).toISOString();
   const pairedSeenAt = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
@@ -601,12 +644,48 @@ test("admin device detail page shows summary, official active client, and additi
 
   await removeIfExists(deviceFilePath);
   await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(layoutFilePath);
 
   try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Lobby split",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/detail",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
     await writeDevice(deviceCode, {
       description: "North lobby panel",
       deviceCode,
-      layoutId: "layout-2",
+      layoutId,
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
@@ -649,7 +728,7 @@ test("admin device detail page shows summary, official active client, and additi
         assert.equal(response.status, 200);
         assert.match(body, /North lobby panel/);
         assert.match(body, /Summary/);
-        assert.match(body, /Layout: <strong>layout-2<\/strong>/);
+        assert.match(body, /Layout: <strong>Lobby split<\/strong>/);
         assert.match(body, /Official Active Client/);
         assert.match(body, /active client/);
         assert.match(body, /Client state: <strong>active<\/strong>/);
@@ -667,11 +746,15 @@ test("admin device detail page shows summary, official active client, and additi
         assert.doesNotMatch(body, /name="clientId" value="client-bravo-5678"/);
         assert.doesNotMatch(body, /name="clientId" value="client-alpha-1234"/);
         assert.match(body, /Authenticate this browser first and keep it active before activating it\./);
+        assert.match(body, /window\.setInterval\(\(\) => \{/);
+        assert.match(body, /window\.location\.reload\(\)/);
+        assert.match(body, /detailPollIntervalMs/);
       });
     });
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(layoutFilePath);
   }
 });
 
@@ -749,6 +832,102 @@ test("admin device detail page shows no active client empty state after reset", 
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("device page layout title prefers description over layoutId", async () => {
+  const deviceCode = "layoutttl";
+  const layoutId = "device-title-layout";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(layoutFilePath);
+
+  try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "South wall display",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: true,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.org/title",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await writeDevice(deviceCode, {
+      deviceCode,
+      layoutId,
+      status: "approved"
+    });
+
+    await withServer(async (baseUrl) => {
+      const authResponse = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-alpha" }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        method: "POST"
+      });
+
+      const cookieHeader = getCookieHeader(authResponse, [
+        "mydashmaster_device",
+        "mydashmaster_device_client"
+      ]);
+
+      await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Cookie: cookieHeader
+        }
+      });
+
+      await activateDeviceClient(
+        deviceCode,
+        getCookieValue(getCookiePair(authResponse, "mydashmaster_device_client"))
+      );
+
+      const pageResponse = await fetch(`${baseUrl}/d/${deviceCode}`, {
+        headers: {
+          Cookie: cookieHeader
+        }
+      });
+      const pageBody = await pageResponse.text();
+
+      assert.equal(pageResponse.status, 200);
+      assert.match(pageBody, /Layout: South wall display/);
+      assert.doesNotMatch(pageBody, /Layout: device-title-layout/);
+    });
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(layoutFilePath);
   }
 });
 
@@ -843,16 +1022,92 @@ test("admin device detail activate action selects the requested client and updat
 
 test("admin can assign a different layout to an existing device", async () => {
   const deviceCode = "layoutsw1";
+  const currentLayoutId = "assign-layout-current";
+  const targetLayoutId = "assign-layout-target";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const currentLayoutFilePath = path.join(layoutsDir, `${currentLayoutId}.json`);
+  const targetLayoutFilePath = path.join(layoutsDir, `${targetLayoutId}.json`);
 
   await removeIfExists(deviceFilePath);
   await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(currentLayoutFilePath);
+  await removeIfExists(targetLayoutFilePath);
 
   try {
+    await fs.writeFile(
+      currentLayoutFilePath,
+      JSON.stringify(
+        {
+          description: "Current assignment",
+          layoutId: currentLayoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.org/current",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await fs.writeFile(
+      targetLayoutFilePath,
+      JSON.stringify(
+        {
+          description: "Target assignment",
+          layoutId: targetLayoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.org/assigned",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
     await writeDevice(deviceCode, {
       deviceCode,
-      layoutId: "layout-1",
+      layoutId: currentLayoutId,
       status: "approved"
     });
 
@@ -871,13 +1126,14 @@ test("admin can assign a different layout to an existing device", async () => {
 
         assert.equal(pageResponse.status, 200);
         assert.match(pageBody, /Assign a layout for device/);
-        assert.match(pageBody, /layout-1/);
+        assert.match(pageBody, /Current assignment/);
+        assert.match(pageBody, /Target assignment/);
 
         const saveResponse = await fetch(
           `${baseUrl}/admin/devices/${deviceCode}/layout`,
           {
             body: new URLSearchParams({
-              layoutId: "layout-2"
+              layoutId: targetLayoutId
             }),
             headers: {
               Cookie: adminCookie,
@@ -894,10 +1150,12 @@ test("admin can assign a different layout to an existing device", async () => {
 
     const updatedDevice = await readDevice(deviceCode);
 
-    assert.equal(updatedDevice.layoutId, "layout-2");
+    assert.equal(updatedDevice.layoutId, targetLayoutId);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(currentLayoutFilePath);
+    await removeIfExists(targetLayoutFilePath);
   }
 });
 
@@ -2008,7 +2266,8 @@ test("admin overview Seen uses official heartbeat instead of non-active client a
         const body = await response.text();
 
         assert.equal(response.status, 200);
-        assert.match(body, /Seen 3m ago/);
+        assert.match(body, /device-overview-secondary-label"[^>]*>Seen</);
+        assert.match(body, /device-overview-secondary-value"[^>]*>3m ago</);
       });
     });
   } finally {
@@ -2132,16 +2391,16 @@ test("admin overview data endpoint derives online offline activatable and inacti
 
         assert.equal(response.status, 200);
         assert.equal(deviceByCode.get("ovonl01").overviewState, "online");
-        assert.match(deviceByCode.get("ovonl01").displaySecondaryLine, /^Seen /);
+        assert.equal(deviceByCode.get("ovonl01").displaySecondaryLabel, "Seen");
+        assert.match(deviceByCode.get("ovonl01").displaySecondaryValue, /^\d+s ago$/);
         assert.equal(deviceByCode.get("ovonl01").lastStatusAt, recentIso);
         assert.equal(deviceByCode.get("ovoff01").overviewState, "offline");
-        assert.match(deviceByCode.get("ovoff01").displaySecondaryLine, /^Seen /);
+        assert.equal(deviceByCode.get("ovoff01").displaySecondaryLabel, "Seen");
+        assert.match(deviceByCode.get("ovoff01").displaySecondaryValue, /^(\d+s ago|\d+m ago)$/);
         assert.equal(deviceByCode.get("ovoff01").lastStatusAt, staleIso);
         assert.equal(deviceByCode.get("ovact01").overviewState, "activatable");
-        assert.match(
-          deviceByCode.get("ovact01").displaySecondaryLine,
-          /^Last access: \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
-        );
+        assert.equal(deviceByCode.get("ovact01").displaySecondaryLabel, "Last access");
+        assert.match(deviceByCode.get("ovact01").displaySecondaryValue, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
         assert.equal(deviceByCode.get("ovact01").lastConnectedAt, absoluteAccessIso);
         assert.equal(deviceByCode.get("ovina01").overviewState, "inactive");
         assert.equal(deviceByCode.get("ovina01").overviewStateLabel, "Not activated");
@@ -2158,16 +2417,54 @@ test("admin device overview renders tile state summary without inline actions an
   const deviceCode = "ovtile01";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const layoutId = "overview-layout";
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
   const nowIso = new Date().toISOString();
 
   await removeIfExists(deviceFilePath);
   await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(layoutFilePath);
 
   try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          description: "Overview wallboard",
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.com/overview",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
     await writeDevice(deviceCode, {
       description: "Tile Device",
       deviceCode,
-      layoutId: "layout-1",
+      layoutId,
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
@@ -2201,7 +2498,7 @@ test("admin device overview renders tile state summary without inline actions an
         assert.match(body, new RegExp(`href="/admin/devices/${deviceCode}"`));
         assert.match(body, /device-overview-status-bubble--online/);
         assert.match(body, /Online/);
-        assert.match(body, /Layout: <strong>layout-1<\/strong>/);
+        assert.match(body, /Layout: <strong>Overview wallboard<\/strong>/);
         assert.match(body, /data-last-status-at="[^"]+"/);
         assert.match(body, /data-last-connected-at="[^"]+"/);
         assert.doesNotMatch(body, /candidate secret/i);
@@ -2209,14 +2506,14 @@ test("admin device overview renders tile state summary without inline actions an
         assert.doesNotMatch(body, />Revoke</);
         assert.match(body, /fetch\("\/admin\/devices\/overview-data"/);
         assert.match(body, /window\.setInterval\(refreshOverview, pollIntervalMs\)/);
-        assert.match(body, /const localUpdateIntervalMs = 1000/);
-        assert.match(body, /function formatRelativeSeen\(timestamp\)/);
-        assert.match(body, /window\.setInterval\(updateAllRelativeTimes, localUpdateIntervalMs\)/);
+        assert.doesNotMatch(body, /localUpdateIntervalMs/);
+        assert.doesNotMatch(body, /updateAllRelativeTimes/);
       });
     });
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(layoutFilePath);
   }
 });
 
@@ -2256,16 +2553,53 @@ test("unauthorized layout fragment request does not receive layout content", asy
 
 test("authorized layout fragment request returns attributed layout markup", async () => {
   const deviceCode = "fragok01";
+  const layoutId = "fragment-layout-target";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
   const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const layoutFilePath = path.join(layoutsDir, `${layoutId}.json`);
 
   await removeIfExists(deviceFilePath);
   await removeIfExists(deviceAuthFilePath);
+  await removeIfExists(layoutFilePath);
 
   try {
+    await fs.writeFile(
+      layoutFilePath,
+      JSON.stringify(
+        {
+          layoutId,
+          layoutVersion: 1,
+          options: {
+            showHeader: false,
+            showLayoutTitle: false,
+            showStatus: false
+          },
+          structure: {
+            type: "row",
+            children: [
+              {
+                type: "box",
+                box: "box1",
+                size: "100%"
+              }
+            ]
+          },
+          boxes: [
+            {
+              name: "box1",
+              url: "https://example.org/fragment",
+              zoom: 1
+            }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
     await writeDevice(deviceCode, {
       deviceCode,
-      layoutId: "layout-2",
+      layoutId,
       status: "approved"
     });
     await updateDeviceAuth(deviceCode, {
@@ -2301,14 +2635,15 @@ test("authorized layout fragment request returns attributed layout markup", asyn
       const fragmentBody = await fragmentResponse.text();
 
       assert.equal(fragmentResponse.status, 200);
-      assert.equal(fragmentResponse.headers.get("x-layout-id"), "layout-2");
+      assert.equal(fragmentResponse.headers.get("x-layout-id"), layoutId);
       assert.match(fragmentBody, /id="device-layout-root"/);
-      assert.match(fragmentBody, /data-layout-id="layout-2"/);
+      assert.match(fragmentBody, new RegExp(`data-layout-id="${layoutId}"`));
       assert.match(fragmentBody, /layout-canvas/);
     });
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
+    await removeIfExists(layoutFilePath);
   }
 });
 
@@ -2384,6 +2719,7 @@ test("admin session cookie is marked secure behind forwarded https", async () =>
 test("admin can create a pending device with an 8 character generated code", async () => {
   const beforeCodes = new Set(await listDeviceCodes());
   let createdDeviceCode = null;
+  let redirectLocation = null;
 
   try {
     await withAdminEnv(async () => {
@@ -2400,6 +2736,7 @@ test("admin can create a pending device with an 8 character generated code", asy
         });
 
         assert.equal(response.status, 302);
+        redirectLocation = response.headers.get("location");
       });
     });
 
@@ -2411,6 +2748,7 @@ test("admin can create a pending device with an 8 character generated code", asy
     createdDeviceCode = newCodes[0];
 
     assert.match(createdDeviceCode, /^[a-z0-9]{8}$/);
+    assert.equal(redirectLocation, `/admin/devices/${createdDeviceCode}`);
 
     const device = await readDevice(createdDeviceCode);
 

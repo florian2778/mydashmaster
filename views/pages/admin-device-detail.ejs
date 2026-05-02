@@ -27,7 +27,7 @@
       <h2>Summary</h2>
     </div>
     <div class="admin-device-detail-summary">
-      <span>Layout: <strong><%= device.layoutId || "none" %></strong></span>
+      <span>Layout: <strong><%= device.currentLayoutDisplayName %></strong></span>
       <span>Status: <strong><%= device.status %></strong></span>
       <span>Official Seen: <strong>Seen <%= device.displayLastSeen %></strong></span>
       <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
@@ -106,7 +106,7 @@
       <div>
         <h3>Assigned Layout</h3>
         <p class="admin-layouts-subtitle">
-          Current layout: <strong><%= device.layoutId || "none" %></strong>
+          Current layout: <strong><%= device.currentLayoutDisplayName %></strong>
         </p>
       </div>
       <div class="admin-device-create-form">
@@ -116,7 +116,7 @@
             <option value="" <%= !device.layoutId ? "selected" : "" %>>No layout assigned</option>
             <% assignableLayouts.forEach((layout) => { %>
               <option value="<%= layout.layoutId %>" <%= layout.layoutId === device.layoutId ? "selected" : "" %>>
-                <%= layout.layoutId %>
+                <%= layout.displayName %>
               </option>
             <% }) %>
           </select>
@@ -155,5 +155,29 @@
     </div>
   </section>
 </section>
+
+<script>
+  (() => {
+    const detailPollIntervalMs = <%- JSON.stringify(detailPollIntervalMs) %>;
+
+    function shouldSkipAutoRefresh() {
+      const activeElement = document.activeElement;
+
+      if (!activeElement) {
+        return false;
+      }
+
+      return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(activeElement.tagName);
+    }
+
+    window.setInterval(() => {
+      if (shouldSkipAutoRefresh()) {
+        return;
+      }
+
+      window.location.reload();
+    }, detailPollIntervalMs);
+  })();
+</script>
 
 <%- include("../partials/footer") %>

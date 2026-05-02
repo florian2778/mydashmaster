@@ -137,6 +137,11 @@ Status responses should expose the assigned layout identity:
 - `layoutId`
 - `layoutVersion`
 
+Layout identity model:
+- `layoutId` is the immutable technical identifier of a layout
+- `description` is an optional human-readable admin label only
+- changing `description` must not affect device assignment or runtime layout identity
+
 If layout identity changed:
 - different `layoutId`
 - or same `layoutId` with different `layoutVersion`
