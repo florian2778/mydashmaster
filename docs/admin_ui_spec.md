@@ -395,27 +395,127 @@ Wichtige Regel:
 Das Device Detail darf Client-Ebene getrennt darstellen.
 
 Es muss trennen zwischen:
-- Official Active Client
-- Additional Pending / Blocked Client Activity
+- Kopf-Summary
+- Official Client
+- Other Clients
+- Technical Details
+- Layout
+- Device Actions
+- Danger Zone
 
-Darstellungsempfehlung:
-- Official Active Client:
-  - `Seen`
-  - Client-Zustand `active`
-  - optional `userAgent`
-- Additional Pending / Blocked Client Activity:
-  - `lastSeen`
-  - Client-Zustand `pending` oder `blocked`
-  - optional `userAgent`
-  - optional Session-Status / letzter erfolgreicher Auth-Zeitpunkt
+Darstellungsmodell:
+- Die Seite ist eine Admin-Konsole für den Device-Betrieb, keine rohe Diagnoseansicht.
+- Primärinformationen stehen oben.
+- diagnostische Rohdaten sind nachgeordnet und einklappbar.
 
-Formatierung:
-- Official Active Client:
-  - `Seen` = relative Darstellung
-  - absoluter Zeitstempel darf zusätzlich als Sekundärinformation angezeigt werden
-- Additional Pending / Blocked Client Activity:
-  - `lastSeenAt` wird standardmäßig als absoluter Zeitstempel angezeigt
-- zusätzliche client activity ist diagnostisch, nicht maßgeblich für `Seen` oder `Online`
+Primäres Anzeige-Statusmodell:
+- `Revoked`
+  - wenn `device.status = revoked`
+- `Active · Online`
+  - wenn ein offizieller Client existiert und der official heartbeat frisch ist
+- `Active · Offline`
+  - wenn ein offizieller Client existiert, der official heartbeat aber nicht mehr frisch ist
+- `Waiting for activation`
+  - wenn kein offizieller Client existiert, aber mindestens ein Client aktivierbar ist
+- `No active client`
+  - wenn kein offizieller Client existiert und kein Client aktuell aktivierbar ist
+
+Dieses Statusmodell ist rein UI-seitig.
+Es führt keine neuen Backend-Fachzustände ein.
+
+Kopf-Summary:
+- primärer Titel:
+  - `description`, falls vorhanden
+  - sonst `deviceCode`
+- `deviceCode` sichtbar als technische Subline
+- primärer Status-Badge:
+  - aus dem Anzeige-Statusmodell oben
+- kompakte Meta-Zeile:
+  - `Official seen`
+  - `Official client IP`
+  - `Layout`
+  - `Device status`
+
+Wichtige Anzeige-Regeln:
+- `Official seen` ist die primäre Aktivitätsinformation
+- `Official seen` bezieht sich immer auf `lastStatusAt`
+- absolute Timestamps sind im Hauptbereich nicht dominant
+- `lastConnectedAt` gehört nicht in die primäre Summary
+
+Public Device URL:
+- das Device Detail zeigt die Public URL:
+  - absolute URL auf Basis des aktuellen Request-Kontexts
+  - z. B. `https://example.org/d/{deviceCode}`
+- die URL ist sichtbar
+- Aktionen:
+  - `Copy`
+  - `Open`
+- `Open` öffnet die Device-URL in einem neuen Tab
+
+Official Client:
+- eigener klarer Hauptabschnitt
+- wenn vorhanden:
+  - gekürzte `clientId`
+  - Status `Active`
+  - zusätzlicher Verfügbarkeitszustand:
+    - `Online`
+    - `Offline`
+  - `Seen` relativ
+  - `IP`
+  - `Authenticated`
+  - gekürzter `userAgent`
+  - kurzer Hinweis:
+    - nur dieser Client schreibt den official heartbeat fort
+- wenn nicht vorhanden:
+  - Empty State
+  - Hinweis, ob aktivierbare Clients vorhanden sind
+
+Other Clients:
+- eigener Abschnitt `Other Clients`
+- Clients werden gruppiert in:
+  - `Ready to activate`
+  - `Blocked`
+  - `Other pending activity`
+- `Activate` erscheint nur für Clients mit Aktivierbarkeit
+- Hinweise sind zustandsbezogen:
+  - anderer Client ist bereits aktiv
+  - Client hat Authentifizierung noch nicht abgeschlossen
+  - Client-Aktivität ist nicht mehr aktuell genug
+
+IP-Anzeige:
+- sichtbare Primärregel:
+  - wenn ein offizieller Client existiert, ist dessen Client-IP die primäre sichtbare IP
+  - sonst Fallback auf die Device-Level-IP
+- die root-level Device-IP ist nicht die primäre Betriebsanzeige
+- sie bleibt diagnostisch sichtbar
+
+Technical Details:
+- als einklappbarer Bereich
+- enthält Roh- und Diagnosedaten
+- dort dürfen absolute Timestamps und technische Rohfelder sichtbar sein
+- Hinweis:
+  - diese Daten sind diagnostisch und können von der primären Summary abweichen
+- der Offen-/Geschlossen-Zustand soll Reloads derselben Device-Detailseite im Browser überleben
+
+Layout:
+- eigener klarer Abschnitt
+- aktuelles Layout prominent
+- `layoutId` als technische Zweitzeile
+- Layout-Auswahl und Speichern bleiben erhalten
+- keine Vermischung mit Client- oder Statusdiagnostik
+
+Actions:
+- gruppiert in:
+  - `Device Actions`
+    - `Reload`
+    - `Reset activation`
+  - `Danger Zone`
+    - `Revoke`
+    - `Delete`
+- Danger Zone ist visuell getrennt
+- kurze Erklärung:
+  - `Revoke` entfernt aktiven Zugriff, behält aber den Device-Datensatz
+  - `Delete` entfernt den Device-Datensatz dauerhaft
 
 Wichtige Regel:
 - zusätzliche Clients sind diagnostisch
@@ -493,58 +593,121 @@ Wenn Live-Updates für die Admin-Seite verbindlich werden sollen, sollten ergän
 ### Ziel
 Detailansicht eines einzelnen Devices
 
-### Inhalte
-- alle vorhandenen Informationen
-- aktueller Status
-- zugewiesenes Layout
+### Ziel-UI
+- ruhige Admin-Konsole statt rohe Diagnoseansicht
+- klarer Statuskopf
+- klare Trennung zwischen Betriebsansicht und Diagnostik
 
-### Funktionen
-- Layout ändern
-- Aktionen (noch zu definieren)
+### Hauptstruktur
+1. Kopfbereich / Status Summary
+2. Public Device URL
+3. Official Client
+4. Other Clients
+5. Technical Details
+6. Layout
+7. Device Actions
+8. Danger Zone
 
-### Anforderungen
-- laufende Aktualisierung
-- Monitoring-Fähigkeit
+### Kopfbereich / Status Summary
+- Titel:
+  - `description`, falls vorhanden
+  - sonst `deviceCode`
+- technische Subline:
+  - `deviceCode`
+- primärer Anzeigezustand:
+  - `Revoked`
+  - `Active · Online`
+  - `Active · Offline`
+  - `Waiting for activation`
+  - `No active client`
+- kompakte Meta-Zeile:
+  - `Official seen`
+  - `Official client IP`
+  - `Layout`
+  - `Device status`
 
-### Konflikt / Lücke
+### Summary-Regeln
+- `Official seen` ist die primäre Aktivitätsanzeige
+- keine prominente Dopplung von:
+  - `Official seen`
+  - `Seen at`
+  - `Seen`
+- `lastConnectedAt` gehört in die Diagnostik, nicht in die Hauptsummary
+- root-level Device-IP gehört nicht in die primäre Betriebsanzeige
 
-„Aktionen (noch zu definieren)“ ist zu offen und steht im Konflikt mit dem bereits klareren Lifecycle-/Admin-Stand.
+### Public Device URL
+- sichtbare URL:
+  - `/d/{deviceCode}`
+- Utility-Aktionen:
+  - `Copy`
+  - `Open`
 
-Denn aus `device-access-lifecycle.md` ergeben sich bereits konkrete Aktionen:
-- Activate
-- Reset activation
-- Revoke
-- Delete
+### Official Client
+- zeigt den offiziellen aktiven Client, wenn vorhanden
+- Inhalte:
+  - gekürzte `clientId`
+  - `Active`
+  - `Online` oder `Offline`
+  - `Seen`
+  - primäre Client-IP
+  - `Authenticated`
+  - gekürzter Browser / `userAgent`
+- Hinweis:
+  - nur dieser Client schreibt den official heartbeat fort
+- wenn kein offizieller Client existiert:
+  - Empty State
+  - Hinweis, ob aktivierbare Clients vorhanden sind
 
-Aus aktueller Admin-Planung zusätzlich:
-- Change layout
-- optional Reload
+### Other Clients
+- gruppiert in:
+  - `Ready to activate`
+  - `Blocked`
+  - `Other pending activity`
+- `Activate` nur für aktivierbare Clients
+- keine generischen Sammelhinweise
+- Hinweise sind zustandsbezogen
 
-### Erforderliche Folgeänderungen in anderen Specs
+### Technical Details
+- einklappbar
+- enthält:
+  - `deviceCode`
+  - `status`
+  - `layoutId`
+  - `lastStatusAt`
+  - `lastConnectedAt`
+  - root-level `lastKnownIp`
+  - `reloadVersion`
+  - volle `clientId`
+  - `lastAuthenticatedAt`
+  - `lastSeenAt`
+  - voller `userAgent`
+- erklärender Hinweis:
+  - diagnostische Daten können von der primären Summary abweichen
 
-Um Device Detail umsetzbar zu machen, sollten die Aktionen in anderen Specs expliziter werden:
+### Layout
+- eigener Bereich
+- aktuelles Layout prominent
+- `layoutId` als technische Zweitzeile
+- Layout-Auswahl und Speichern bleiben erhalten
 
-- `docs/device-access-lifecycle.md`
-  - Admin-Aktionen im Detailbereich explizit nennen:
-    - Activate
-    - Reset activation
-    - Revoke
-    - Delete
-    - optional Reload
-- `docs/architecture.md`
-  - Admin Backend Responsibilities ergänzen:
-    - device detail actions
-    - layout reassignment
+### Actions
+- `Device Actions`:
+  - `Reload`
+  - `Reset activation`
+- `Danger Zone`:
+  - `Revoke`
+  - `Delete`
 
-### Empfehlung
+### Aktualisierung
+- die Detailseite darf periodisch aktualisiert werden
+- Full Page Refresh ist für die Admin-UI zulässig
+- eine fragmentbasierte Aktualisierung ist optional, aber nicht erforderlich
+- der Refresh darf pausieren, solange diagnostische Details geöffnet sind
 
-Das Device Detail sollte in diesem Dokument bereits als Zielaktionensatz definieren:
-- Layout ändern
-- Activate
-- Reset activation
-- Revoke
-- Delete
-- optional Reload
+### Konsistenzregel
+- das Device Detail verbessert die Darstellung, nicht das Fachmodell
+- keine neue Auth-, Heartbeat- oder Lifecycle-Logik wird aus der UI eingeführt
+- alle Anzeigezustände werden aus bestehenden Daten abgeleitet
 
 ---
 

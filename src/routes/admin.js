@@ -129,6 +129,20 @@ function formatRelativeSeen(value) {
   return `${diffDays}d ago`;
 }
 
+function shortenUserAgent(value, maxLength = 72) {
+  if (typeof value !== "string" || value.trim() === "") {
+    return "-";
+  }
+
+  const normalized = value.trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
 function getConfiguredDevicePollIntervalMs() {
   const configuredPollIntervalMs = Number.parseInt(
     process.env.DEVICE_POLL_INTERVAL_MS || "",
@@ -298,10 +312,26 @@ function buildClientDisplay(device, deviceAuth, client) {
     ...client,
     canActivate: derivedState.isActivatable,
     clientState: derivedState.state,
+    clientStateLabel:
+      derivedState.state === "active"
+        ? "Active"
+        : derivedState.state === "blocked"
+          ? "Blocked"
+          : "Pending",
+    clientStateTone:
+      derivedState.state === "active"
+        ? "fresh"
+        : derivedState.state === "blocked"
+          ? "stale"
+          : "aged",
     displayClientId: shortenClientId(client.clientId),
     displayLastAuthenticatedAt: formatAbsoluteTimestamp(client.lastAuthenticatedAt),
     displayLastKnownIp: client.lastKnownIp || "-",
-    displayLastSeenAt: formatAbsoluteTimestamp(client.lastSeenAt)
+    displayLastSeenAt: formatAbsoluteTimestamp(client.lastSeenAt),
+    displayLastSeenRelative: formatRelativeSeen(client.lastSeenAt),
+    displayUserAgentShort: shortenUserAgent(client.userAgent),
+    isAuthenticated: derivedState.isAuthenticated,
+    isRecentlyActive: derivedState.isRecentlyActive
   };
 }
 
@@ -318,10 +348,91 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
       .map((client) => buildClientDisplay(device, deviceAuth, client))
     : [];
   const overviewDevice = await mapDeviceCard(device);
+  const hasActivatableClients = additionalClients.some((client) => client.canActivate);
+  const officialClientDisplay = activeClient
+    ? {
+      ...buildClientDisplay(device, deviceAuth, activeClient),
+      displaySeen: formatRelativeSeen(device.lastStatusAt),
+      lastConnectedAt: device.lastConnectedAt || null,
+      displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
+      activeStateLabel: "Active",
+      activityStatusLabel: overviewDevice.activeClientHeartbeatFresh
+        ? "Online"
+        : "Offline",
+      activityStatusTone: overviewDevice.activeClientHeartbeatFresh ? "fresh" : "aged",
+      displayPrimaryIp: activeClient.lastKnownIp || device.lastKnownIp || "-"
+    }
+    : null;
+  const displayStatusKey =
+    device.status === "revoked"
+      ? "revoked"
+      : overviewDevice.hasActiveClient
+        ? (overviewDevice.activeClientHeartbeatFresh ? "active-online" : "active-offline")
+        : hasActivatableClients
+          ? "waiting"
+          : "no-active-client";
+  const displayStatusConfig = {
+    "active-online": {
+      label: "Active · Online",
+      tone: "fresh",
+      note: "Official client is active and the heartbeat is current."
+    },
+    "active-offline": {
+      label: "Active · Offline",
+      tone: "aged",
+      note: "Official client exists, but the heartbeat is no longer fresh."
+    },
+    waiting: {
+      label: "Waiting for activation",
+      tone: "aged",
+      note: "No official client is active yet, but at least one client is ready."
+    },
+    "no-active-client": {
+      label: "No active client",
+      tone: "stale",
+      note: "No official client is active and no current client is ready."
+    },
+    revoked: {
+      label: "Revoked",
+      tone: "stale",
+      note: "Access is revoked until the device is approved and activated again."
+    }
+  };
+  const displayStatus = displayStatusConfig[displayStatusKey];
+  const primaryIp = officialClientDisplay?.displayPrimaryIp || device.lastKnownIp || "-";
+  const groupedClients = {
+    readyToActivate: additionalClients.filter((client) => client.canActivate),
+    blocked: additionalClients.filter(
+      (client) => !client.canActivate && client.clientState === "blocked"
+    ),
+    otherPending: additionalClients.filter(
+      (client) => !client.canActivate && client.clientState !== "blocked"
+    )
+  };
+  groupedClients.otherPending = groupedClients.otherPending.map((client) => ({
+    ...client,
+    displayHint:
+      !client.isAuthenticated
+        ? "Client has not completed authentication."
+        : !client.isRecentlyActive
+          ? "Client activity is no longer recent enough."
+          : "Client is pending and waiting for activation."
+  }));
+  groupedClients.blocked = groupedClients.blocked.map((client) => ({
+    ...client,
+    displayHint: "Another client is currently active."
+  }));
+  groupedClients.readyToActivate = groupedClients.readyToActivate.map((client) => ({
+    ...client,
+    displayHint: "Ready to become the official client."
+  }));
+  const publicDeviceUrl = `/d/${device.deviceCode}`;
+  const publicDeviceUrlAbsolute = options.publicDeviceUrlAbsolute || publicDeviceUrl;
 
   return {
     actionErrorMessage: options.actionErrorMessage || null,
     assignableLayouts,
+    canActivateClients: device.status !== "revoked",
     device: {
       ...overviewDevice,
       currentLayoutDisplayName: currentLayout
@@ -330,19 +441,46 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
       displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
       displayOfficialSeenAbsolute: formatAbsoluteTimestamp(device.lastStatusAt),
       displayActivationState:
-        activeClient ? "active client" : "pending"
+        activeClient ? "active client" : "pending",
+      displayStatusLabel: displayStatus.label,
+      displayStatusTone: displayStatus.tone,
+      displayStatusNote: displayStatus.note,
+      displayOfficialClientIp: primaryIp,
+      displayLayoutTechnicalId: device.layoutId || "-",
+      displayTitle: device.description || device.deviceCode,
+      publicDeviceUrl,
+      publicDeviceUrlAbsolute
     },
-    canActivateClients: device.status !== "revoked",
-    officialActiveClient: activeClient
-      ? {
-        ...buildClientDisplay(device, deviceAuth, activeClient),
-        displaySeen: formatRelativeSeen(device.lastStatusAt),
-        lastConnectedAt: device.lastConnectedAt || null,
-        displayLastConnectedAt: formatAbsoluteTimestamp(device.lastConnectedAt),
-        activeStateLabel: "active client"
-      }
-      : null,
-    additionalClients,
+    officialActiveClient: officialClientDisplay,
+    groupedClients,
+    hasActivatableClients,
+    otherClientsCount: additionalClients.length,
+    technicalDetails: {
+      deviceCode: device.deviceCode,
+      status: device.status,
+      layoutId: device.layoutId || null,
+      lastStatusAt: device.lastStatusAt || null,
+      lastConnectedAt: device.lastConnectedAt || null,
+      lastKnownIp: device.lastKnownIp || null,
+      reloadVersion: device.reloadVersion || 0,
+      officialClient: officialClientDisplay
+        ? {
+          clientId: officialClientDisplay.clientId,
+          lastAuthenticatedAt: officialClientDisplay.lastAuthenticatedAt || null,
+          lastSeenAt: officialClientDisplay.lastSeenAt || null,
+          lastKnownIp: officialClientDisplay.lastKnownIp || null,
+          userAgent: officialClientDisplay.userAgent || null
+        }
+        : null,
+      additionalClients: additionalClients.map((client) => ({
+        clientId: client.clientId,
+        clientState: client.clientState,
+        lastAuthenticatedAt: client.lastAuthenticatedAt || null,
+        lastSeenAt: client.lastSeenAt || null,
+        lastKnownIp: client.lastKnownIp || null,
+        userAgent: client.userAgent || null
+      }))
+    },
     pageTitle: device.deviceCode
   };
 }
@@ -480,7 +618,18 @@ function renderLoginPage(res, options = {}) {
   });
 }
 
-async function renderDeviceDetailPage(res, deviceCode, options = {}) {
+function buildAbsoluteDeviceUrl(req, deviceCode) {
+  const protocol = req.protocol || "http";
+  const host = req.get("host");
+
+  if (!host) {
+    return `/d/${deviceCode}`;
+  }
+
+  return `${protocol}://${host}/d/${deviceCode}`;
+}
+
+async function renderDeviceDetailPage(req, res, deviceCode, options = {}) {
   const { actionErrorMessage = null, httpStatus = 200 } = options;
   const [devices, layouts] = await Promise.all([listDevices(), listLayouts()]);
   const device = devices.find((entry) => entry.deviceCode === deviceCode);
@@ -492,6 +641,7 @@ async function renderDeviceDetailPage(res, deviceCode, options = {}) {
     });
   }
 
+  const publicDeviceUrlAbsolute = buildAbsoluteDeviceUrl(req, deviceCode);
   const deviceAuth = (await readDeviceAuth(deviceCode)) || {
     clients: device.clients
   };
@@ -499,8 +649,11 @@ async function renderDeviceDetailPage(res, deviceCode, options = {}) {
   return res.status(httpStatus).render(
     "pages/admin-device-detail",
     {
-      ...(await buildDeviceDetailViewModel(device, deviceAuth, layouts, { actionErrorMessage })),
-      detailPollIntervalMs: 4000
+      ...(await buildDeviceDetailViewModel(device, deviceAuth, layouts, {
+        actionErrorMessage,
+        publicDeviceUrlAbsolute
+      })),
+      detailPollIntervalMs: 10000
     }
   );
 }
@@ -746,7 +899,7 @@ router.get("/devices/:deviceCode", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
 
-    await renderDeviceDetailPage(res, deviceCode);
+    await renderDeviceDetailPage(req, res, deviceCode);
   } catch (error) {
     next(error);
   }
@@ -880,7 +1033,7 @@ router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
       typeof req.body?.clientId === "string" ? req.body.clientId.trim() : "";
 
     if (!clientId) {
-      return renderDeviceDetailPage(res, deviceCode, {
+      return renderDeviceDetailPage(req, res, deviceCode, {
         actionErrorMessage: "Select a valid client before activation.",
         httpStatus: 400
       });
@@ -890,7 +1043,7 @@ router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
       await activateDeviceClient(deviceCode, clientId);
     } catch (error) {
       if (error?.name === "ValidationError") {
-        return renderDeviceDetailPage(res, deviceCode, {
+        return renderDeviceDetailPage(req, res, deviceCode, {
           actionErrorMessage: error.message,
           httpStatus: 400
         });

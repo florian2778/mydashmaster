@@ -9,6 +9,7 @@ const { hashDeviceSecret } = require("../src/auth/device-auth");
 const {
   activateDeviceClient,
   listDeviceCodes,
+  recordDeviceClientActivity,
   readDevice,
   readDeviceAuth,
   updateDeviceAuth,
@@ -454,7 +455,8 @@ test("admin device detail shows Activate again after reset for recent authentica
           deviceAuth.clients.every((client) => client.isPairedClient === false),
           true
         );
-        assert.match(detailHtml, /No active client selected\./);
+        assert.match(detailHtml, /No official client/);
+        assert.match(detailHtml, /A client is ready below\. Activate it to make this device operational\./);
         assert.match(detailHtml, /value="client-a"/);
         assert.match(detailHtml, /value="client-b"/);
         assert.equal((detailHtml.match(/>Activate</g) || []).length, 2);
@@ -728,24 +730,24 @@ test("admin device detail page shows summary, official active client, and additi
         assert.equal(response.status, 200);
         assert.match(body, /North lobby panel/);
         assert.match(body, /Summary/);
-        assert.match(body, /Layout: <strong>Lobby split<\/strong>/);
-        assert.match(body, /Official Active Client/);
-        assert.match(body, /active client/);
-        assert.match(body, /Client state: <strong>active<\/strong>/);
-        assert.match(body, /Seen: <strong>Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)<\/strong>/);
-        assert.match(body, new RegExp(`Seen at: <strong>${lastStatusAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}<\\/strong>`));
-        assert.match(body, new RegExp(`Last access: ${lastConnectedAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(body, /Official client IP/);
+        assert.match(body, /Lobby split/);
+        assert.match(body, /Official Client/);
+        assert.match(body, /Active · Offline/);
+        assert.match(body, /<span class="admin-device-status-pill admin-device-status-pill--fresh">Active<\/span>/);
+        assert.match(body, /<span class="admin-device-status-pill admin-device-status-pill--aged">Offline<\/span>/);
+        assert.match(body, /Seen (just now|\d+s ago|\d+m ago|\d+h ago|\d+d ago)/);
         assert.match(body, /PairedClient\/1\.0/);
         assert.match(body, /203\.0\.113\.7/);
-        assert.match(body, /Additional Pending \/ Blocked Client Activity/);
+        assert.match(body, /Other Clients/);
         assert.match(body, /client-b\.\.\./);
-        assert.match(body, /Client state: <strong>blocked<\/strong>/);
+        assert.match(body, /Blocked/);
         assert.match(body, new RegExp(additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
         assert.match(body, /SpareBrowser\/2\.0/);
-        assert.match(body, new RegExp(`Authenticated: ${additionalSeenAt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+        assert.match(body, new RegExp(`full clientId<\\/strong> <code>client-bravo-5678<\\/code>`));
         assert.doesNotMatch(body, /name="clientId" value="client-bravo-5678"/);
         assert.doesNotMatch(body, /name="clientId" value="client-alpha-1234"/);
-        assert.match(body, /Authenticate this browser first and keep it active before activating it\./);
+        assert.match(body, /Another client is currently active\./);
         assert.match(body, /window\.setInterval\(\(\) => \{/);
         assert.match(body, /window\.location\.reload\(\)/);
         assert.match(body, /detailPollIntervalMs/);
@@ -825,8 +827,8 @@ test("admin device detail page shows no active client empty state after reset", 
         const detailBody = await detailResponse.text();
 
         assert.equal(detailResponse.status, 200);
-        assert.match(detailBody, /No active client selected\./);
-        assert.doesNotMatch(detailBody, /Client state: <strong>active<\/strong>/);
+        assert.match(detailBody, /No official client/);
+        assert.doesNotMatch(detailBody, /admin-device-status-pill--fresh">Active<\/span>/);
       });
     });
   } finally {
@@ -998,10 +1000,10 @@ test("admin device detail activate action selects the requested client and updat
         const body = await detailResponse.text();
 
         assert.equal(detailResponse.status, 200);
-        assert.match(body, /Official Active Client/);
+        assert.match(body, /Official Client/);
         assert.match(body, /BrowserB\/1\.0/);
-        assert.match(body, /Client state: <strong>active<\/strong>/);
-        assert.match(body, /Authenticate this browser first and keep it active before activating it\./);
+        assert.match(body, /admin-device-status-pill--fresh">Active<\/span>/);
+        assert.match(body, /Another client is currently active\./);
         assert.doesNotMatch(body, /name="clientId" value="client-b"/);
       });
     });
@@ -2213,6 +2215,74 @@ test("stale client activity older than 48 hours is cleaned up during status poll
       deviceAuth.clients.some((client) => client.clientId === "stale-client"),
       false
     );
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("parallel device-auth activity updates keep device auth JSON readable", async () => {
+  const deviceCode = "racecond1";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+  const now = new Date().toISOString();
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(deviceCode, {
+      clients: [
+        {
+          clientId: "paired-client",
+          isPairedClient: true,
+          lastAuthenticatedAt: now,
+          lastSeenAt: now,
+          sessionSecretHash: hashDeviceSecret("secret-alpha"),
+          userAgent: "PairedClient/1.0"
+        }
+      ],
+      deviceCode,
+      secretHash: hashDeviceSecret("secret-alpha"),
+      updatedAt: now
+    });
+
+    await Promise.all([
+      recordDeviceClientActivity(
+        deviceCode,
+        "paired-client",
+        { isOfficialHeartbeat: true },
+        "PairedClient/1.0",
+        "203.0.113.41"
+      ),
+      recordDeviceClientActivity(
+        deviceCode,
+        "browser-two",
+        { isOfficialHeartbeat: false },
+        "BrowserTwo/1.0",
+        "203.0.113.42"
+      ),
+      recordDeviceClientActivity(
+        deviceCode,
+        "browser-three",
+        { isOfficialHeartbeat: false },
+        "BrowserThree/1.0",
+        "203.0.113.43"
+      )
+    ]);
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+    const clientIds = new Set((deviceAuth.clients || []).map((client) => client.clientId));
+
+    assert.ok(deviceAuth);
+    assert.match(deviceAuth.lastStatusAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(clientIds.has("paired-client"), true);
+    assert.equal(clientIds.has("browser-two"), true);
+    assert.equal(clientIds.has("browser-three"), true);
   } finally {
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);

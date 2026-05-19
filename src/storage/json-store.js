@@ -18,6 +18,7 @@ const DEVICE_CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const LAYOUT_ID_LENGTH = 6;
 const LAYOUT_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
 const CLIENT_RETENTION_MS = 48 * 60 * 60 * 1000;
+const deviceAuthWriteQueues = new Map();
 
 async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
@@ -25,7 +26,21 @@ async function ensureDir(dirPath) {
 
 async function readJsonFile(filePath) {
   const content = await fs.readFile(filePath, "utf8");
-  return JSON.parse(content);
+
+  try {
+    return JSON.parse(content);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      const fileError = new Error(
+        `Invalid JSON in ${filePath} (${content.length} bytes): ${error.message}`
+      );
+      fileError.name = "JsonReadError";
+      fileError.cause = error;
+      throw fileError;
+    }
+
+    throw error;
+  }
 }
 
 function getLayoutStatus(validation) {
@@ -317,7 +332,45 @@ async function generateUniqueDeviceCode(maxAttempts = 32) {
 }
 
 async function writeJsonFile(filePath, value) {
-  await fs.writeFile(filePath, JSON.stringify(value, null, 2));
+  const directory = path.dirname(filePath);
+  const tempFilePath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString("hex")}.tmp`
+  );
+  const content = JSON.stringify(value, null, 2);
+  const handle = await fs.open(tempFilePath, "w");
+
+  try {
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+
+  await fs.rename(tempFilePath, filePath);
+}
+
+async function runSerializedDeviceAuthUpdate(deviceCode, operation) {
+  const previous = deviceAuthWriteQueues.get(deviceCode) || Promise.resolve();
+  let releaseQueue;
+  const next = new Promise((resolve) => {
+    releaseQueue = resolve;
+  });
+  const currentQueue = previous.then(() => next);
+
+  deviceAuthWriteQueues.set(deviceCode, currentQueue);
+
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    releaseQueue();
+
+    if (deviceAuthWriteQueues.get(deviceCode) === currentQueue) {
+      deviceAuthWriteQueues.delete(deviceCode);
+    }
+  }
 }
 
 async function deleteJsonFile(filePath) {
@@ -574,29 +627,33 @@ async function writeDeviceAuth(deviceCode, deviceAuth) {
 }
 
 async function updateDeviceAuth(deviceCode, updates) {
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+  return runSerializedDeviceAuthUpdate(deviceCode, async () => {
+    const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
+    const resolvedUpdates =
+      typeof updates === "function"
+        ? await updates(existingDeviceAuth)
+        : updates;
 
-  return writeDeviceAuth(deviceCode, {
-    ...existingDeviceAuth,
-    ...updates,
-    deviceCode
+    return writeDeviceAuth(deviceCode, {
+      ...existingDeviceAuth,
+      ...resolvedUpdates,
+      deviceCode
+    });
   });
 }
 
 async function recordDeviceActivity(deviceCode, lastKnownIp) {
   const now = new Date().toISOString();
 
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, () => ({
     lastConnectedAt: now,
     lastKnownIp,
     updatedAt: now
-  });
+  }));
 }
 
 async function revokeDeviceAuth(deviceCode) {
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
-
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => ({
     ...existingDeviceAuth,
     clients: cleanupStaleClients(existingDeviceAuth.clients).map((client) => ({
       ...client,
@@ -606,13 +663,11 @@ async function revokeDeviceAuth(deviceCode) {
     })),
     secretHash: undefined,
     updatedAt: new Date().toISOString()
-  });
+  }));
 }
 
 async function resetDevicePairing(deviceCode) {
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
-
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => ({
     ...existingDeviceAuth,
     candidateSecretHash: undefined,
     clients: cleanupStaleClients(existingDeviceAuth.clients).map((client) => ({
@@ -622,14 +677,13 @@ async function resetDevicePairing(deviceCode) {
     lastStatusAt: undefined,
     secretHash: undefined,
     updatedAt: new Date().toISOString()
-  });
+  }));
 }
 
 async function assignPairedActiveClient(deviceCode, clientId, userAgent) {
   const now = new Date().toISOString();
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
 
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => ({
     ...existingDeviceAuth,
     clients: updateClientList(existingDeviceAuth.clients, {
       clientId,
@@ -637,79 +691,83 @@ async function assignPairedActiveClient(deviceCode, clientId, userAgent) {
       userAgent
     }),
     updatedAt: now
-  });
+  }));
 }
 
 async function activateDeviceClient(deviceCode, clientId) {
-  const now = new Date().toISOString();
-  const existingDeviceAuth = await readDeviceAuth(deviceCode);
   const device = await readDevice(deviceCode);
 
-  if (!existingDeviceAuth || !device) {
+  if (!device) {
     return null;
   }
-
-  const clients = cleanupStaleClients(existingDeviceAuth.clients);
-  const selectedClient = clients.find((client) => client.clientId === clientId);
-
-  if (!selectedClient) {
-    const error = new Error(`Unknown clientId "${clientId}" for device ${deviceCode}`);
-    error.name = "ValidationError";
-    throw error;
-  }
-
-  if (!selectedClient.lastAuthenticatedAt) {
-    const error = new Error(
-      `Client "${clientId}" has not established an authenticated browser session`
-    );
-    error.name = "ValidationError";
-    throw error;
-  }
-
-  const { deriveClientState } = require("../device/client-state");
-  const derivedState = deriveClientState({
-    clientId,
-    device,
-    deviceAuth: existingDeviceAuth
-  });
-
-  if (!derivedState.isActivatable) {
-    const error = new Error(`Client "${clientId}" is not currently activatable`);
-    error.name = "ValidationError";
-    throw error;
-  }
-
-  if (!selectedClient.sessionSecretHash) {
-    const error = new Error(
-      `Client "${clientId}" has no authenticated secret for activation`
-    );
-    error.name = "ValidationError";
-    throw error;
-  }
-
-  if (
-    existingDeviceAuth.secretHash &&
-    selectedClient.sessionSecretHash !== existingDeviceAuth.secretHash
-  ) {
-    const error = new Error(
-      `Client "${clientId}" is not authenticated for the current secret cycle`
-    );
-    error.name = "ValidationError";
-    throw error;
-  }
-
   await updateDevice(deviceCode, {
     status: "approved"
   });
 
-  return updateDeviceAuth(deviceCode, {
-    ...existingDeviceAuth,
-    clients: clients.map((client) => ({
-      ...client,
-      isPairedClient: client.clientId === clientId
-    })),
-    secretHash: existingDeviceAuth.secretHash || selectedClient.sessionSecretHash,
-    updatedAt: now
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => {
+    if (!existingDeviceAuth) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const clients = cleanupStaleClients(existingDeviceAuth.clients);
+    const selectedClient = clients.find((client) => client.clientId === clientId);
+
+    if (!selectedClient) {
+      const error = new Error(`Unknown clientId "${clientId}" for device ${deviceCode}`);
+      error.name = "ValidationError";
+      throw error;
+    }
+
+    if (!selectedClient.lastAuthenticatedAt) {
+      const error = new Error(
+        `Client "${clientId}" has not established an authenticated browser session`
+      );
+      error.name = "ValidationError";
+      throw error;
+    }
+
+    const { deriveClientState } = require("../device/client-state");
+    const derivedState = deriveClientState({
+      clientId,
+      device,
+      deviceAuth: existingDeviceAuth
+    });
+
+    if (!derivedState.isActivatable) {
+      const error = new Error(`Client "${clientId}" is not currently activatable`);
+      error.name = "ValidationError";
+      throw error;
+    }
+
+    if (!selectedClient.sessionSecretHash) {
+      const error = new Error(
+        `Client "${clientId}" has no authenticated secret for activation`
+      );
+      error.name = "ValidationError";
+      throw error;
+    }
+
+    if (
+      existingDeviceAuth.secretHash &&
+      selectedClient.sessionSecretHash !== existingDeviceAuth.secretHash
+    ) {
+      const error = new Error(
+        `Client "${clientId}" is not authenticated for the current secret cycle`
+      );
+      error.name = "ValidationError";
+      throw error;
+    }
+
+    return {
+      ...existingDeviceAuth,
+      clients: clients.map((client) => ({
+        ...client,
+        isPairedClient: client.clientId === clientId
+      })),
+      secretHash: existingDeviceAuth.secretHash || selectedClient.sessionSecretHash,
+      updatedAt: now
+    };
   });
 }
 
@@ -723,25 +781,27 @@ async function recordDeviceClientActivity(
   const { isOfficialHeartbeat = false } = options || {};
 
   const now = new Date().toISOString();
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
-  const clients = updateClientList(existingDeviceAuth.clients, {
-    clientId,
-    lastSeenAt: now,
-    lastKnownIp,
-    userAgent
+
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => {
+    const clients = updateClientList(existingDeviceAuth.clients, {
+      clientId,
+      lastSeenAt: now,
+      lastKnownIp,
+      userAgent
+    });
+    const currentClient = clients.find((client) => client.clientId === clientId);
+    const nextDeviceAuth = {
+      ...existingDeviceAuth,
+      clients,
+      updatedAt: now
+    };
+
+    if (currentClient?.isPairedClient && isOfficialHeartbeat) {
+      nextDeviceAuth.lastStatusAt = now;
+    }
+
+    return nextDeviceAuth;
   });
-  const currentClient = clients.find((client) => client.clientId === clientId);
-  const nextDeviceAuth = {
-    ...existingDeviceAuth,
-    clients,
-    updatedAt: now
-  };
-
-  if (currentClient?.isPairedClient && isOfficialHeartbeat) {
-    nextDeviceAuth.lastStatusAt = now;
-  }
-
-  return updateDeviceAuth(deviceCode, nextDeviceAuth);
 }
 
 async function recordAuthenticatedClientSession(
@@ -752,9 +812,8 @@ async function recordAuthenticatedClientSession(
   lastKnownIp
 ) {
   const now = new Date().toISOString();
-  const existingDeviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
 
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, (existingDeviceAuth) => ({
     ...existingDeviceAuth,
     clients: updateClientList(existingDeviceAuth.clients, {
       clientId,
@@ -765,17 +824,15 @@ async function recordAuthenticatedClientSession(
       userAgent
     }),
     updatedAt: now
-  });
+  }));
 }
 
 async function requestDeviceReload(deviceCode) {
-  const deviceAuth = (await readDeviceAuth(deviceCode)) || { deviceCode };
-
-  return updateDeviceAuth(deviceCode, {
+  return updateDeviceAuth(deviceCode, (deviceAuth) => ({
     ...deviceAuth,
     reloadVersion: (deviceAuth.reloadVersion || 0) + 1,
     updatedAt: new Date().toISOString()
-  });
+  }));
 }
 
 async function listDeviceCodes() {

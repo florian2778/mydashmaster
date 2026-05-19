@@ -727,10 +727,21 @@ body.device-page .layout-node--box {
   color: #334155;
 }
 
+.admin-action-button--success {
+  background: #dff5e7;
+  border-color: #8fc9a8;
+  color: #136c3d;
+}
+
 .admin-action-button--danger {
   background: #fde7e7;
   border-color: #e8a5a5;
   color: #b42318;
+}
+
+.admin-action-button--pulse {
+  transition: transform 120ms ease, background-color 160ms ease, border-color 160ms ease;
+  transform: translateY(1px) scale(0.98);
 }
 
 .admin-action-button--delete {
@@ -786,6 +797,302 @@ body.device-page .layout-node--box {
 .admin-device-detail-panel {
   display: grid;
   gap: 1rem;
+}
+
+.admin-device-hero {
+  gap: 0.65rem;
+}
+
+.admin-device-hero-titleline {
+  align-items: flex-start;
+}
+
+.admin-device-hero-subline,
+.admin-device-hero-note {
+  color: #52606d;
+  margin: 0;
+}
+
+.admin-device-hero-subline code {
+  color: #334155;
+}
+
+.admin-device-meta-row {
+  color: #52606d;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.2rem;
+}
+
+.admin-device-meta-row strong {
+  color: #1f2933;
+  display: inline-block;
+  margin-right: 0.35rem;
+}
+
+.admin-device-status-pill {
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 0.24rem 0.65rem;
+}
+
+.admin-device-status-pill--fresh {
+  background: #e9f8ef;
+  color: #136c3d;
+}
+
+.admin-device-status-pill--aged {
+  background: #fff3d6;
+  color: #9a6700;
+}
+
+.admin-device-status-pill--stale {
+  background: #eef2f6;
+  color: #52606d;
+}
+
+.admin-device-url-panel {
+  gap: 0.5rem;
+}
+
+.admin-device-url-card {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.9rem 1rem;
+}
+
+.admin-device-url-value {
+  color: #1f2933;
+  flex: 1 1 18rem;
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-device-url-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.admin-device-summary-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.admin-device-summary-card {
+  background: #f8fafc;
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.95rem;
+}
+
+.admin-device-summary-label {
+  color: #7b8794;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.admin-device-summary-value {
+  color: #1f2933;
+  font-size: 1.08rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.admin-device-summary-meta {
+  color: #52606d;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.admin-device-client-card-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.admin-device-client-card-head h3,
+.admin-device-client-card-head h4 {
+  margin: 0.2rem 0 0;
+}
+
+.admin-device-client-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
+.admin-device-client-facts {
+  color: #52606d;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+}
+
+.admin-device-client-facts strong {
+  color: #1f2933;
+  display: inline-block;
+  margin-right: 0.3rem;
+}
+
+.admin-device-client-note {
+  color: #52606d;
+  margin: 0;
+}
+
+.admin-device-client-empty {
+  background: #f8fafc;
+  border: 1px dashed #c9d3dd;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.admin-device-client-empty h3 {
+  margin: 0 0 0.25rem;
+}
+
+.admin-device-client-empty p {
+  color: #52606d;
+  margin: 0;
+}
+
+.admin-device-client-groups {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-device-client-group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-device-client-group-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.admin-device-client-group-head h3,
+.admin-device-technical-grid h3,
+.admin-device-technical-list h3 {
+  margin: 0;
+}
+
+.admin-device-client-group-head span {
+  color: #52606d;
+  font-size: 0.88rem;
+}
+
+.admin-device-technical-details {
+  background: #f8fafc;
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+}
+
+.admin-device-technical-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.admin-device-technical-note {
+  color: #52606d;
+  margin: 0.8rem 0 0;
+}
+
+.admin-device-technical-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  margin-top: 0.9rem;
+}
+
+.admin-device-technical-grid dl,
+.admin-device-technical-list {
+  margin: 0;
+}
+
+.admin-device-technical-grid dl div {
+  border-bottom: 1px solid #e3eaf1;
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.45rem 0;
+}
+
+.admin-device-technical-grid dt {
+  color: #7b8794;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.admin-device-technical-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-device-technical-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.admin-device-technical-client {
+  background: #fff;
+  border: 1px solid #d8e1ea;
+  border-radius: 10px;
+  padding: 0.85rem 0.9rem;
+}
+
+.admin-device-technical-client p {
+  margin: 0.18rem 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-device-layout-meta {
+  color: #52606d;
+  margin: 0;
+}
+
+.admin-device-action-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-device-action-panel {
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.admin-device-danger-zone {
+  background: #fdf9f8;
+  border-color: #ebd3cf;
+}
+
+.admin-device-danger-copy {
+  color: #7a3a33;
+  margin: 0;
 }
 
 .admin-layout-detail-header {
@@ -908,6 +1215,26 @@ body.device-page .layout-node--box {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
+}
+
+@media (max-width: 720px) {
+  .admin-device-url-card,
+  .admin-device-client-card-head,
+  .admin-device-client-group-head,
+  .admin-layout-detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-device-meta-row,
+  .admin-device-client-facts,
+  .admin-device-url-actions {
+    width: 100%;
+  }
+
+  .admin-device-action-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-layout-validation {

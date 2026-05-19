@@ -2,18 +2,22 @@
 
 <section class="panel admin-device-detail-panel">
   <header class="admin-layout-detail-header">
-    <div class="admin-layout-detail-heading">
+    <div class="admin-layout-detail-heading admin-device-hero">
       <p class="admin-layouts-eyebrow">Device</p>
-      <div class="admin-layout-detail-titleline">
-        <h1><%= device.deviceCode %></h1>
-        <span class="layout-status layout-status--<%= device.status === "approved" ? "valid" : device.status === "pending" ? "warning" : "error" %>">
-          <%= device.status %>
+      <div class="admin-layout-detail-titleline admin-device-hero-titleline">
+        <h1><%= device.displayTitle %></h1>
+        <span class="admin-device-status-pill admin-device-status-pill--<%= device.displayStatusTone %>">
+          <%= device.displayStatusLabel %>
         </span>
-        <span class="layout-edge-indicator"><%= device.displayActivationState %></span>
       </div>
-      <% if (device.description) { %>
-        <p class="admin-layouts-subtitle"><%= device.description %></p>
-      <% } %>
+      <p class="admin-device-hero-subline"><code><%= device.deviceCode %></code></p>
+      <p class="admin-device-hero-note"><%= device.displayStatusNote %></p>
+      <div class="admin-device-meta-row">
+        <span><strong>Official seen</strong> Seen <%= device.displayLastSeen %></span>
+        <span><strong>Official client IP</strong> <%= device.displayOfficialClientIp %></span>
+        <span><strong>Layout</strong> <%= device.currentLayoutDisplayName %></span>
+        <span><strong>Device status</strong> <%= device.status %></span>
+      </div>
     </div>
     <a class="admin-secondary-link" href="/admin/devices">Back to devices</a>
   </header>
@@ -22,76 +26,132 @@
     <p class="admin-form-error"><%= actionErrorMessage %></p>
   <% } %>
 
-  <section class="admin-layout-detail-section">
+  <section class="admin-layout-detail-section admin-device-url-panel">
     <div class="admin-layout-detail-section-head">
-      <h2>Summary</h2>
+      <h2>Public Device URL</h2>
     </div>
-    <div class="admin-device-detail-summary">
-      <span>Layout: <strong><%= device.currentLayoutDisplayName %></strong></span>
-      <span>Status: <strong><%= device.status %></strong></span>
-      <span>Official Seen: <strong>Seen <%= device.displayLastSeen %></strong></span>
-      <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
-      <span>Last access: <strong><%= device.displayLastAccessDate %></strong></span>
-      <span>Last IP: <strong><%= device.displayLastIp %></strong></span>
+    <div class="admin-device-url-card">
+      <code class="admin-device-url-value" data-device-public-url><%= device.publicDeviceUrlAbsolute %></code>
+      <div class="admin-device-url-actions">
+        <button class="admin-action-button admin-action-button--secondary" type="button" data-copy-device-url>Copy</button>
+        <a class="admin-action-button admin-action-button--secondary" href="<%= device.publicDeviceUrlAbsolute %>" target="_blank" rel="noreferrer">Open</a>
+      </div>
     </div>
   </section>
 
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
-      <h2>Official Active Client</h2>
+      <h2>Summary</h2>
+    </div>
+    <div class="admin-device-summary-grid">
+      <article class="admin-device-summary-card">
+        <p class="admin-device-summary-label">Availability</p>
+        <p class="admin-device-summary-value"><%= device.displayStatusLabel %></p>
+        <p class="admin-device-summary-meta">Seen <%= device.displayLastSeen %></p>
+      </article>
+      <article class="admin-device-summary-card">
+        <p class="admin-device-summary-label">Official client</p>
+        <p class="admin-device-summary-value"><%= officialActiveClient ? officialActiveClient.displayClientId : "None" %></p>
+        <p class="admin-device-summary-meta"><%= device.displayOfficialClientIp %></p>
+      </article>
+      <article class="admin-device-summary-card">
+        <p class="admin-device-summary-label">Layout</p>
+        <p class="admin-device-summary-value"><%= device.currentLayoutDisplayName %></p>
+        <p class="admin-device-summary-meta"><%= device.layoutId ? device.layoutId : "No layout assigned" %></p>
+      </article>
+    </div>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Official Client</h2>
     </div>
 
     <% if (officialActiveClient) { %>
       <article class="admin-device-client-card admin-device-client-card--official">
-        <div class="device-overview-facts device-overview-facts--primary">
-          <span>State: <strong><%= officialActiveClient.activeStateLabel %></strong></span>
-          <span>Client state: <strong><%= officialActiveClient.clientState %></strong></span>
-          <span>Seen: <strong>Seen <%= officialActiveClient.displaySeen %></strong></span>
-          <span>Seen at: <strong><%= device.displayOfficialSeenAbsolute %></strong></span>
+        <div class="admin-device-client-card-head">
+          <div>
+            <p class="admin-device-summary-label">Official client</p>
+            <h3><code title="<%= officialActiveClient.clientId %>"><%= officialActiveClient.displayClientId %></code></h3>
+          </div>
+          <div class="admin-device-client-statuses">
+            <span class="admin-device-status-pill admin-device-status-pill--fresh"><%= officialActiveClient.activeStateLabel %></span>
+            <span class="admin-device-status-pill admin-device-status-pill--<%= officialActiveClient.activityStatusTone %>"><%= officialActiveClient.activityStatusLabel %></span>
+          </div>
         </div>
-        <div class="device-overview-facts device-overview-facts--secondary">
-          <span>Client: <code title="<%= officialActiveClient.clientId %>"><%= officialActiveClient.displayClientId %></code></span>
-          <span>Last access: <%= officialActiveClient.displayLastConnectedAt %></span>
-          <span>Authenticated: <%= officialActiveClient.displayLastAuthenticatedAt %></span>
-          <span>IP: <%= officialActiveClient.displayLastKnownIp %></span>
-          <span>User-Agent: <%= officialActiveClient.userAgent || "-" %></span>
+        <div class="admin-device-client-facts">
+          <span><strong>Seen</strong> Seen <%= officialActiveClient.displaySeen %></span>
+          <span><strong>IP</strong> <%= officialActiveClient.displayPrimaryIp %></span>
+          <span><strong>Authenticated</strong> <%= officialActiveClient.displayLastAuthenticatedAt %></span>
+          <span><strong>Browser</strong> <span title="<%= officialActiveClient.userAgent || "-" %>"><%= officialActiveClient.displayUserAgentShort %></span></span>
         </div>
+        <p class="admin-device-client-note">Only this client advances the official heartbeat.</p>
       </article>
     <% } else { %>
-      <p class="admin-layout-detail-empty">No active client selected. Activate one of the current authenticated clients below.</p>
+      <article class="admin-device-client-empty">
+        <h3>No official client</h3>
+        <p>
+          <% if (hasActivatableClients) { %>
+            A client is ready below. Activate it to make this device operational.
+          <% } else { %>
+            No client is currently ready for activation. Keep the device page open until a client authenticates and becomes recent enough.
+          <% } %>
+        </p>
+      </article>
     <% } %>
   </section>
 
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
-      <h2>Additional Pending / Blocked Client Activity</h2>
+      <h2>Other Clients</h2>
     </div>
 
-    <% if (additionalClients.length === 0) { %>
-      <p class="admin-layout-detail-empty">No additional pending or blocked client activity.</p>
+    <% if (otherClientsCount === 0) { %>
+      <p class="admin-layout-detail-empty">No additional client activity.</p>
     <% } else { %>
-      <div class="admin-device-client-list">
-        <% additionalClients.forEach((client) => { %>
-          <article class="admin-device-client-card">
-            <div class="device-overview-facts device-overview-facts--primary">
-              <span>Client: <code title="<%= client.clientId %>"><%= client.displayClientId %></code></span>
-              <span>Client state: <strong><%= client.clientState %></strong></span>
-              <span>Last seen: <strong><%= client.displayLastSeenAt %></strong></span>
+      <% const clientGroups = [
+        { title: "Ready to activate", items: groupedClients.readyToActivate },
+        { title: "Blocked", items: groupedClients.blocked },
+        { title: "Other pending activity", items: groupedClients.otherPending }
+      ]; %>
+      <div class="admin-device-client-groups">
+        <% clientGroups.forEach((group) => { %>
+          <section class="admin-device-client-group">
+            <div class="admin-device-client-group-head">
+              <h3><%= group.title %></h3>
+              <span><%= group.items.length %></span>
             </div>
-            <div class="device-overview-facts device-overview-facts--secondary">
-              <span>Authenticated: <%= client.displayLastAuthenticatedAt %></span>
-              <span>IP: <%= client.displayLastKnownIp %></span>
-              <span>User-Agent: <%= client.userAgent || "-" %></span>
-            </div>
-            <% if (canActivateClients && client.canActivate) { %>
-              <form action="/admin/devices/<%= device.deviceCode %>/activate-client" method="post">
-                <input type="hidden" name="clientId" value="<%= client.clientId %>">
-                <button class="admin-action-button" type="submit">Activate</button>
-              </form>
-            <% } else if (canActivateClients) { %>
-              <p class="device-diagnostic-note">Authenticate this browser first and keep it active before activating it.</p>
+            <% if (group.items.length === 0) { %>
+              <p class="admin-layout-detail-empty">No clients in this group.</p>
+            <% } else { %>
+              <div class="admin-device-client-list">
+                <% group.items.forEach((client) => { %>
+                  <article class="admin-device-client-card">
+                    <div class="admin-device-client-card-head">
+                      <div>
+                        <p class="admin-device-summary-label">Client</p>
+                        <h4><code title="<%= client.clientId %>"><%= client.displayClientId %></code></h4>
+                      </div>
+                      <span class="admin-device-status-pill admin-device-status-pill--<%= client.clientStateTone %>"><%= client.clientStateLabel %></span>
+                    </div>
+                    <div class="admin-device-client-facts">
+                      <span><strong>Seen</strong> <%= client.displayLastSeenRelative %></span>
+                      <span><strong>Authenticated</strong> <%= client.displayLastAuthenticatedAt %></span>
+                      <span><strong>IP</strong> <%= client.displayLastKnownIp %></span>
+                      <span><strong>Browser</strong> <span title="<%= client.userAgent || "-" %>"><%= client.displayUserAgentShort %></span></span>
+                    </div>
+                    <p class="admin-device-client-note"><%= client.displayHint %></p>
+                    <% if (canActivateClients && client.canActivate) { %>
+                      <form action="/admin/devices/<%= device.deviceCode %>/activate-client" method="post">
+                        <input type="hidden" name="clientId" value="<%= client.clientId %>">
+                        <button class="admin-action-button" type="submit">Activate</button>
+                      </form>
+                    <% } %>
+                  </article>
+                <% }) %>
+              </div>
             <% } %>
-          </article>
+          </section>
         <% }) %>
       </div>
     <% } %>
@@ -99,16 +159,66 @@
 
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
-      <h2>Layout</h2>
+      <h2>Technical Details</h2>
     </div>
+    <details class="admin-device-technical-details" data-diagnostics-details data-device-code="<%= device.deviceCode %>">
+      <summary>Show diagnostic data</summary>
+      <p class="admin-device-technical-note">Technical details are diagnostic and may differ from the primary status summary.</p>
+      <div class="admin-device-technical-grid">
+        <div>
+          <h3>Device</h3>
+          <dl>
+            <div><dt>deviceCode</dt><dd><code><%= technicalDetails.deviceCode %></code></dd></div>
+            <div><dt>status</dt><dd><%= technicalDetails.status %></dd></div>
+            <div><dt>layoutId</dt><dd><%= technicalDetails.layoutId || "-" %></dd></div>
+            <div><dt>lastStatusAt</dt><dd><%= technicalDetails.lastStatusAt || "-" %></dd></div>
+            <div><dt>lastConnectedAt</dt><dd><%= technicalDetails.lastConnectedAt || "-" %></dd></div>
+            <div><dt>root lastKnownIp</dt><dd><%= technicalDetails.lastKnownIp || "-" %></dd></div>
+            <div><dt>reloadVersion</dt><dd><%= technicalDetails.reloadVersion %></dd></div>
+          </dl>
+        </div>
+        <div>
+          <h3>Official Client</h3>
+          <% if (technicalDetails.officialClient) { %>
+            <dl>
+              <div><dt>full clientId</dt><dd><code><%= technicalDetails.officialClient.clientId %></code></dd></div>
+              <div><dt>lastAuthenticatedAt</dt><dd><%= technicalDetails.officialClient.lastAuthenticatedAt || "-" %></dd></div>
+              <div><dt>lastSeenAt</dt><dd><%= technicalDetails.officialClient.lastSeenAt || "-" %></dd></div>
+              <div><dt>lastKnownIp</dt><dd><%= technicalDetails.officialClient.lastKnownIp || "-" %></dd></div>
+              <div><dt>full userAgent</dt><dd><%= technicalDetails.officialClient.userAgent || "-" %></dd></div>
+            </dl>
+          <% } else { %>
+            <p class="admin-layout-detail-empty">No official client data.</p>
+          <% } %>
+        </div>
+      </div>
+      <div class="admin-device-technical-list">
+        <h3>Other Client Diagnostics</h3>
+        <% if (technicalDetails.additionalClients.length === 0) { %>
+          <p class="admin-layout-detail-empty">No additional client diagnostics.</p>
+        <% } else { %>
+          <% technicalDetails.additionalClients.forEach((client) => { %>
+            <article class="admin-device-technical-client">
+              <p><strong>full clientId</strong> <code><%= client.clientId %></code></p>
+              <p><strong>clientState</strong> <%= client.clientState %></p>
+              <p><strong>lastAuthenticatedAt</strong> <%= client.lastAuthenticatedAt || "-" %></p>
+              <p><strong>lastSeenAt</strong> <%= client.lastSeenAt || "-" %></p>
+              <p><strong>lastKnownIp</strong> <%= client.lastKnownIp || "-" %></p>
+              <p><strong>full userAgent</strong> <%= client.userAgent || "-" %></p>
+            </article>
+          <% }) %>
+        <% } %>
+      </div>
+    </details>
+  </section>
+
+  <section class="admin-layout-detail-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>Change Layout</h2>
+    </div>
+    <p class="admin-device-layout-meta">Current layout: <strong><%= device.currentLayoutDisplayName %></strong> · <code><%= device.displayLayoutTechnicalId %></code></p>
     <form class="admin-device-create admin-device-layout-panel admin-device-detail-layout-form" action="/admin/devices/<%= device.deviceCode %>/layout" method="post">
       <input type="hidden" name="returnTo" value="detail">
-      <div>
-        <h3>Assigned Layout</h3>
-        <p class="admin-layouts-subtitle">
-          Current layout: <strong><%= device.currentLayoutDisplayName %></strong>
-        </p>
-      </div>
       <div class="admin-device-create-form">
         <label>
           <span>Layout</span>
@@ -127,31 +237,45 @@
   </section>
 
   <section class="admin-layout-detail-section">
-    <div class="admin-layout-detail-section-head">
-      <h2>Actions</h2>
-    </div>
-    <div class="admin-device-detail-actions">
-      <% if (device.canResetPairing) { %>
-        <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
-          <input type="hidden" name="returnTo" value="detail">
-          <button class="admin-action-button admin-action-button--secondary" type="submit">Reset activation</button>
-        </form>
-      <% } %>
-      <% if (device.canReload) { %>
-        <form action="/admin/devices/<%= device.deviceCode %>/reload" method="post">
-          <input type="hidden" name="returnTo" value="detail">
-          <button class="admin-action-button admin-action-button--secondary" type="submit">Reload</button>
-        </form>
-      <% } %>
-      <% if (device.canRevoke) { %>
-        <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
-          <input type="hidden" name="returnTo" value="detail">
-          <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
-        </form>
-      <% } %>
-      <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
-        <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
-      </form>
+    <div class="admin-device-action-grid">
+      <section class="admin-device-action-panel">
+        <div class="admin-layout-detail-section-head">
+          <h2>Device Actions</h2>
+        </div>
+        <div class="admin-device-detail-actions">
+          <% if (device.canReload) { %>
+            <form action="/admin/devices/<%= device.deviceCode %>/reload" method="post">
+              <input type="hidden" name="returnTo" value="detail">
+              <button class="admin-action-button admin-action-button--secondary" type="submit">Reload</button>
+            </form>
+          <% } %>
+          <% if (device.canResetPairing) { %>
+            <form action="/admin/devices/<%= device.deviceCode %>/reset-pairing" method="post">
+              <input type="hidden" name="returnTo" value="detail">
+              <button class="admin-action-button admin-action-button--secondary" type="submit">Reset activation</button>
+            </form>
+          <% } %>
+        </div>
+      </section>
+
+      <section class="admin-device-action-panel admin-device-danger-zone">
+        <div class="admin-layout-detail-section-head">
+          <h2>Danger Actions</h2>
+        </div>
+        <p class="admin-device-danger-copy">Revoke removes active access but keeps the device record.</p>
+        <p class="admin-device-danger-copy">Delete permanently removes the device record.</p>
+        <div class="admin-device-detail-actions">
+          <% if (device.canRevoke) { %>
+            <form action="/admin/devices/<%= device.deviceCode %>/revoke" method="post">
+              <input type="hidden" name="returnTo" value="detail">
+              <button class="admin-action-button admin-action-button--danger" type="submit">Revoke</button>
+            </form>
+          <% } %>
+          <form action="/admin/devices/<%= device.deviceCode %>/delete" method="post">
+            <button class="admin-action-button admin-action-button--delete" type="submit">Delete</button>
+          </form>
+        </div>
+      </section>
     </div>
   </section>
 </section>
@@ -159,6 +283,88 @@
 <script>
   (() => {
     const detailPollIntervalMs = <%- JSON.stringify(detailPollIntervalMs) %>;
+    const publicUrlElement = document.querySelector("[data-device-public-url]");
+    const copyButton = document.querySelector("[data-copy-device-url]");
+    const diagnosticsDetails = document.querySelector("[data-diagnostics-details]");
+    const diagnosticsDeviceCode = diagnosticsDetails?.getAttribute("data-device-code") || "";
+    const diagnosticsStorageKey = diagnosticsDeviceCode
+      ? `mydashmaster:device-detail:diagnostics-open:${diagnosticsDeviceCode}`
+      : null;
+
+    if (diagnosticsDetails && diagnosticsStorageKey) {
+      try {
+        if (window.localStorage.getItem(diagnosticsStorageKey) === "true") {
+          diagnosticsDetails.open = true;
+        }
+      } catch (error) {
+        console.error("Failed to restore diagnostics state", error);
+      }
+
+      diagnosticsDetails.addEventListener("toggle", () => {
+        try {
+          window.localStorage.setItem(
+            diagnosticsStorageKey,
+            diagnosticsDetails.open ? "true" : "false"
+          );
+        } catch (error) {
+          console.error("Failed to persist diagnostics state", error);
+        }
+      });
+    }
+
+    if (copyButton && publicUrlElement) {
+      copyButton.addEventListener("click", async () => {
+        const value = publicUrlElement.textContent || "";
+
+        if (!value) {
+          return;
+        }
+
+        async function copyWithFallback(text) {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+          }
+
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "absolute";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          textarea.setSelectionRange(0, textarea.value.length);
+
+          const copied = document.execCommand("copy");
+          document.body.removeChild(textarea);
+
+          if (!copied) {
+            throw new Error("Copy command was not successful");
+          }
+        }
+
+        try {
+          copyButton.classList.add("admin-action-button--pulse");
+          await copyWithFallback(value);
+          copyButton.textContent = "Copied";
+          copyButton.classList.add("admin-action-button--success");
+          window.setTimeout(() => {
+            copyButton.textContent = "Copy";
+            copyButton.classList.remove("admin-action-button--success");
+            copyButton.classList.remove("admin-action-button--pulse");
+          }, 1600);
+        } catch (error) {
+          console.error("Failed to copy device URL", error);
+          copyButton.textContent = "Copy failed";
+          copyButton.classList.add("admin-action-button--danger");
+          window.setTimeout(() => {
+            copyButton.textContent = "Copy";
+            copyButton.classList.remove("admin-action-button--danger");
+            copyButton.classList.remove("admin-action-button--pulse");
+          }, 1800);
+        }
+      });
+    }
 
     function shouldSkipAutoRefresh() {
       const activeElement = document.activeElement;
@@ -171,6 +377,14 @@
     }
 
     window.setInterval(() => {
+      if (document.hidden) {
+        return;
+      }
+
+      if (diagnosticsDetails?.open) {
+        return;
+      }
+
       if (shouldSkipAutoRefresh()) {
         return;
       }
