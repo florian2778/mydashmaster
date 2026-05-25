@@ -95,6 +95,14 @@ Additional browser identity tracking:
 - stable browser-profile `clientId`
 - not an auth factor by itself
 
+Additional browser-side secret storage:
+- `deviceSecret` is stored browser-side per `deviceCode`
+- primary storage key:
+  - `mydashmaster-device-secret:{deviceCode}`
+- legacy fallback key:
+  - `mydashmaster-device-secret`
+- legacy values may only be migrated to the scoped key after successful `/auth`
+
 ---
 
 ## Access State Model
@@ -145,6 +153,28 @@ These states are derived centrally and must be shared by:
 Important:
 - an expired session cookie must not be treated as missing admin activation
 - it must resolve to `reauth_required` if the browser is otherwise the correct active client context
+- a browser with an active layout must not immediately reload into a waiting page on a single transient soft-state poll
+- `reauth_required` on an already active layout should first try silent `/auth`
+- `pending_activation` on an already active layout should require repeated confirmation before leaving the layout
+
+## Active Layout Runtime Behavior
+
+On the already rendered active device page:
+
+- `active_authorized`
+  - keep layout visible
+  - reset any soft-failure counter
+- `reauth_required`
+  - do not immediately switch to waiting UI
+  - attempt silent `/auth` using the browser-side scoped `deviceSecret`
+  - if the silent reauth succeeds, keep the layout visible
+  - if reauth fails hard (`401`, `auth_mismatch`), switch away from the layout
+- `pending_activation`
+  - treat as a soft/transient state first
+  - require repeated confirmation before leaving the layout
+- `revoked`, `auth_mismatch`, `blocked_by_other_client`
+  - treat as hard states
+  - leave the layout immediately
 
 ---
 
@@ -165,6 +195,7 @@ Status payload should expose:
 - `isActiveClient`
 - `hasActiveClient`
 - `hasCurrentAuthentication`
+- `canAttemptBootstrapAuth`
 - `canAttemptReauth`
 - plus existing compatibility fields while needed
 

@@ -457,6 +457,7 @@ Wichtige Regel:
 - Session-Ablauf darf nicht als fehlende Aktivierung dargestellt werden
 - `pending_activation` bedeutet echte Admin-/Freigabe-Wartephase
 - `blocked_by_other_client` und `auth_mismatch` dürfen keine Auto-Reauth-Schleife auslösen
+- ein device-spezifischer Browser-Secret-Kontext ist Voraussetzung dafür, dass mehrere Device-URLs im selben Browserprofil nicht kollidieren
 - `revoked` bleibt ein harter Stopp
 
 ### Empfehlung
@@ -465,6 +466,7 @@ Die Device-UI soll deshalb künftig:
 - Device-Level-Liveness über `Seen` / optional `Online` zeigen
 - Access-State-Texte klar von Heartbeat/Liveness trennen
 - Session-Recovery als `reauth_required` sichtbar machen, nicht als fehlende Aktivierung
+- auf bereits aktiven Layout-Seiten transiente Soft-States nicht sofort sichtbar machen
 
 ### Weitere Lücke
 
@@ -647,7 +649,7 @@ Detailansicht eines einzelnen Devices
   - `device-access-lifecycle.md`
 - Empfehlung:
   - nicht übernehmen
-  - stattdessen Status + Pairing + Diagnose
+  - stattdessen Status + Aktivierung + Diagnose
 
 ### 4. Version / Timestamp pro Layout als Pflicht
 - Status:
@@ -671,6 +673,13 @@ Detailansicht eines einzelnen Devices
 - Änderung sinnvoll in:
   - `device-access-lifecycle.md`
   - `architecture.md`
+
+### 7. Browser-Secret-Kontext nicht präzisiert
+- Konflikt mit:
+  - aktuellem Multi-Device-Verhalten im selben Browserprofil
+- Empfehlung:
+  - device-spezifischen `deviceSecret`-Key als Referenzmodell dokumentieren
+  - Legacy-Fallback nur kontrolliert migrieren
 
 ---
 
@@ -711,7 +720,7 @@ Sinnvoll zur Präzisierung:
 - Admin-UI soll Lifecycle-Zustände vollständig anzeigen können
 - Unterscheidung zwischen:
   - technischem Device-Status
-  - Pairing-Zustand
+  - Aktivierungszustand
   - Diagnosezustand
 
 ### Änderungen an `docs/device-layout-client-rerender.md`

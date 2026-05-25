@@ -124,10 +124,50 @@ Daher gilt:
 - dann ist der korrekte Zustand `reauth_required`
 - die Browser-Seite soll automatisch `/auth` mit dem lokalen `deviceSecret` versuchen
 
+Device-Secret-Kontext im Browser:
+- der Browser speichert `deviceSecret` scoped pro `deviceCode`
+- primärer Key:
+  - `mydashmaster-device-secret:{deviceCode}`
+- Legacy-Fallback:
+  - `mydashmaster-device-secret`
+- der Legacy-Wert darf nur nach erfolgreichem `/auth` in den scoped Key migriert werden
+- bei `401` oder `auth_mismatch` darf keine stille Neuerzeugung oder blinde Migration erfolgen
+- mehrere Device-URLs im selben Browserprofil dürfen keine Secrets dauerhaft teilen
+
 Kein automatisches Recovery bei:
 - `auth_mismatch`
 - `blocked_by_other_client`
 - `revoked`
+
+---
+
+## Verhalten auf der aktiven Layout-Seite
+
+Ein bereits laufendes Layout darf nicht wegen eines einzelnen transienten Poll-Ergebnisses sichtbar auf eine Pending-Seite springen.
+
+Darum gilt auf der aktiven Layout-Seite:
+
+- `active_authorized`
+  - Layout bleibt sichtbar
+  - Soft-Failure-Zähler wird zurückgesetzt
+- `reauth_required`
+  - kein sofortiger Wechsel auf Pending
+  - stiller `/auth`-Versuch im Hintergrund
+  - bei Erfolg bleibt das Layout sichtbar
+  - bei hartem Fehler (`401`, `auth_mismatch`) ist der Wechsel zur State-Seite erlaubt
+- `pending_activation`
+  - auf einer bereits aktiven Layout-Seite zunächst als verdächtiger/transienter Zustand behandeln
+  - erst nach wiederholter Bestätigung die State-Seite laden
+- `revoked`
+  - sofortiger harter Wechsel
+- `auth_mismatch`
+  - sofortiger harter Wechsel
+- `blocked_by_other_client`
+  - sofortiger harter Wechsel
+
+Wichtige Regel:
+- `pending_activation` bleibt fachlich ein echter Aktivierungswartefall
+- auf einer bereits aktiven Seite darf dieser Zustand aber erst nach kurzer Bestätigung sichtbar werden, um Flicker zu vermeiden
 
 ---
 
@@ -175,3 +215,5 @@ Zusätzliche Clients bleiben diagnostisch und dürfen nie:
 5. `auth_mismatch` ohne Auto-Reauth-Schleife
 6. `blocked_by_other_client` ohne Layoutzugriff
 7. nur `active_authorized` schreibt `lastStatusAt`
+8. scoped `deviceSecret` pro `deviceCode` mit erfolgreicher Legacy-Migration nur nach erfolgreichem `/auth`
+9. aktive Layout-Seite bleibt bei einmaligem transientem `pending_activation` sichtbar

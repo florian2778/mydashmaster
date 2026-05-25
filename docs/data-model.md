@@ -155,6 +155,11 @@ Session and activation rules:
 - `blocked_by_other_client` means another browser is already the active client.
 - only a client in `active_authorized` may render the layout and update the official heartbeat.
 - additional client activity in `pending_activation`, `reauth_required`, `auth_mismatch`, `blocked_by_other_client`, or `revoked` must not redefine `Seen` or `Online`.
+- browser-side `deviceSecret` storage is device-scoped:
+  - primary key: `mydashmaster-device-secret:{deviceCode}`
+  - legacy fallback key: `mydashmaster-device-secret`
+  - legacy values may only be migrated to the scoped key after successful `/auth`
+  - a failed `/auth` with a legacy value must not silently create or persist a new scoped secret
 
 Client activity update rule:
 - update `clients[].lastSeenAt` only for:
@@ -178,10 +183,12 @@ Retention / cleanup:
 - On first contact:
   - client sends deviceSecret
   - server may store candidateSecretHash in legacy approval flows
+  - browser stores the secret under the scoped per-device key
 
 - On authentication:
   - hash(deviceSecret) must match the current `secretHash`
   - successful `/auth` refreshes browser-session evidence and the short-lived session cookie
+  - successful `/auth` may promote a legacy browser-side secret into the scoped per-device key
 
 - On active rendering:
   - the browser must be the explicitly activated client
@@ -191,6 +198,7 @@ Retention / cleanup:
 - On session expiry:
   - the browser may fall to `reauth_required`
   - automatic `/auth` should restore the session without a new admin activation
+  - on an already active page, a single transient soft-state poll should not immediately replace the layout
 
 - On revocation:
   - `secretHash` is removed or invalidated

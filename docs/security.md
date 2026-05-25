@@ -2,10 +2,13 @@
 
 ## Device Access
 
-Access requires:
+The security model separates three layers:
 1. valid device code (routing only)
-2. approved device
-3. valid device secret (validated via cookie or handshake)
+2. approved device + explicitly active client selection
+3. valid browser session, established or refreshed via device secret
+
+Layout access is granted only when all three layers align.
+Technical authentication alone does not make a browser the active layout client.
 
 ---
 
@@ -25,10 +28,18 @@ Access pending
 
 ## Device Secret (Client)
 
-- generated once on first access (cryptographically strong random value)
-- stored locally on the device (e.g. localStorage)
+- generated browser-side as needed (cryptographically strong random value)
+- stored locally in browser storage
 - never exposed in URL
 - sent to server for authentication
+
+Current browser storage model:
+- primary key per device:
+  - `mydashmaster-device-secret:{deviceCode}`
+- legacy fallback key:
+  - `mydashmaster-device-secret`
+- legacy values may only be migrated to the scoped key after successful `/auth`
+- a failed `/auth` with a legacy value must not silently create a replacement secret for that device
 
 Note:
 Using localStorage is an intentional MVP tradeoff. The secret is accessible via client-side JavaScript and therefore not as secure as hardware-bound storage, but acceptable for controlled device/kiosk environments.
@@ -38,7 +49,7 @@ Using localStorage is an intentional MVP tradeoff. The secret is accessible via 
 ## Pending State (Registration Phase)
 
 - client sends deviceSecret to server
-- server stores hash(deviceSecret) as candidateSecretHash
+- server may store hash(deviceSecret) as candidateSecretHash in legacy approval flows
 - device remains in status: pending
 - no access is granted yet
 
@@ -63,18 +74,24 @@ On approval:
 2. Server checks:
    - device exists
    - device status
-3. If approved:
+3. Browser may attempt /auth for technical authentication
+4. If approved:
    - validate cookie if present
    - otherwise request deviceSecret from client
-4. Server compares:
+5. Server compares:
    - hash(deviceSecret) vs stored hash
-5. Access granted only if:
+6. Technical authentication succeeds only if:
+   - device is approved or in a lifecycle path that still allows technical authentication buildup
+   - secret matches the current allowed server-side hash context
+7. Layout access is granted only if:
    - device is approved
-   - secret matches
+   - this browser is the active client
+   - the browser also has a valid current session cookie
 
 If validation fails:
 - no layout is shown
-- fallback to pending / not authorized state
+- fallback to the derived lifecycle state
+- `auth_mismatch` is a hard stop for automatic recovery
 
 ---
 
@@ -84,6 +101,7 @@ If validation fails:
 - cookie represents a temporary validated session
 - cookie does NOT replace deviceSecret authentication
 - cookie can be revalidated or reissued using deviceSecret
+- active devices may renew this cookie during successful authorized status polling
 
 Cookie expectations (MVP):
 - Secure (in HTTPS environments)
@@ -111,6 +129,11 @@ If client loses local storage (e.g. browser reset):
 - device cannot authenticate anymore
 - must be re-activated by admin
 
+If the browser still has a mismatching old secret:
+- it may fall into `auth_mismatch`
+- this should not trigger endless automatic retries
+- expected recovery is a conscious admin recovery step, e.g. reset activation or reconnect with the originally active browser
+
 ---
 
 ## Reset Activation
@@ -133,10 +156,14 @@ Device code alone is NOT sufficient for access.
 
 ---
 
-## Minimal Exposure
+## Device Page Exposure
 
-Pending page shows only:
+The public non-layout page may show:
 - device code
-- access pending
+- derived access-state message
+- in `pending_activation`, also the current `clientId` for admin-guided activation
 
-No additional information.
+It must not expose:
+- plain deviceSecret
+- secretHash
+- candidateSecretHash
