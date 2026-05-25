@@ -1,6 +1,9 @@
 const express = require("express");
 
-const { deriveClientState } = require("../device/client-state");
+const {
+  deriveClientState,
+  deriveDeviceAccessState
+} = require("../device/client-state");
 const {
   clearDeviceSessionCookie,
   ensureDeviceClientId,
@@ -16,10 +19,10 @@ const {
 
 const router = express.Router();
 
-function renderClientState(res, deviceCode, clientState, options = {}) {
+function renderAccessState(res, deviceCode, accessState, options = {}) {
   let state = null;
 
-  if (clientState === "blocked") {
+  if (accessState === "blocked_by_other_client") {
     state = {
       message: "This browser is not the active one",
       note:
@@ -28,13 +31,31 @@ function renderClientState(res, deviceCode, clientState, options = {}) {
       shouldBootstrap: false,
       shouldPoll: true
     };
-  } else if (clientState === "revoked") {
+  } else if (accessState === "auth_mismatch") {
+    state = {
+      message: "Authentication mismatch",
+      note:
+        "This browser no longer matches the current device secret. Reconnect it from the active browser context or ask an admin for help.",
+      pageTitle: "Authentication mismatch",
+      shouldBootstrap: false,
+      shouldPoll: true
+    };
+  } else if (accessState === "revoked") {
     state = {
       message: "Access revoked",
       note:
         "This device no longer has access. Please contact an administrator.",
       pageTitle: "Access revoked",
       shouldBootstrap: false,
+      shouldPoll: true
+    };
+  } else if (accessState === "reauth_required") {
+    state = {
+      message: "Reconnecting session",
+      note:
+        "This browser is known but needs to refresh its device session. Leave this page open.",
+      pageTitle: "Reconnecting session",
+      shouldBootstrap: true,
       shouldPoll: true
     };
   } else if (options.deviceStatus !== "approved") {
@@ -74,10 +95,15 @@ function renderClientState(res, deviceCode, clientState, options = {}) {
   }
 
   return res.render("pages/device-pending", {
-    clientState,
+    accessState,
+    canAttemptBootstrapAuth: Boolean(options.canAttemptBootstrapAuth),
+    canAttemptReauth: Boolean(options.canAttemptReauth),
     clientId: options.clientId || null,
+    clientState: options.clientState || "pending",
     deviceStatus: options.deviceStatus || null,
     deviceCode,
+    hasCurrentAuthentication: Boolean(options.hasCurrentAuthentication),
+    hasValidSession: Boolean(options.hasValidSession),
     isAuthenticated: Boolean(options.isAuthenticated),
     isActivatable: Boolean(options.isActivatable),
     message: state.message,
@@ -102,33 +128,42 @@ router.get("/:deviceCode", async (req, res, next) => {
       });
     }
 
-    if (device.status === "revoked") {
-      clearDeviceSessionCookie(req, res, deviceCode);
-      return renderClientState(res, deviceCode, "revoked");
-    }
-
     const deviceAuth = await readDeviceAuth(deviceCode);
-    const derivedState = deriveClientState({
+    const hasValidSession = Boolean(
+      deviceAuth?.secretHash && hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)
+    );
+    const derivedAccessState = deriveDeviceAccessState({
       clientId,
       device,
-      deviceAuth
+      deviceAuth,
+      hasValidSession
+    });
+    const derivedClientState = deriveClientState({
+      clientId,
+      device,
+      deviceAuth,
+      hasValidSession
     });
 
-    if (
-      device.status !== "approved" ||
-      derivedState.state !== "active" ||
-      !deviceAuth?.secretHash ||
-      !hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)
-    ) {
-      if (derivedState.state === "blocked") {
+    if (derivedAccessState.accessState !== "active_authorized") {
+      if (
+        derivedAccessState.accessState === "blocked_by_other_client" ||
+        derivedAccessState.accessState === "auth_mismatch" ||
+        derivedAccessState.accessState === "revoked"
+      ) {
         clearDeviceSessionCookie(req, res, deviceCode);
       }
 
-      return renderClientState(res, deviceCode, derivedState.state, {
+      return renderAccessState(res, deviceCode, derivedAccessState.accessState, {
+        canAttemptBootstrapAuth: derivedAccessState.canAttemptBootstrapAuth,
+        canAttemptReauth: derivedAccessState.canAttemptReauth,
         clientId,
+        clientState: derivedClientState.state,
         deviceStatus: device.status,
-        isAuthenticated: derivedState.isAuthenticated,
-        isActivatable: derivedState.isActivatable
+        hasCurrentAuthentication: derivedAccessState.hasCurrentAuthentication,
+        hasValidSession: derivedAccessState.hasValidSession,
+        isAuthenticated: derivedClientState.isAuthenticated,
+        isActivatable: derivedAccessState.isActivatable
       });
     }
 
@@ -136,6 +171,7 @@ router.get("/:deviceCode", async (req, res, next) => {
     const layoutViewModel = await buildDeviceLayoutViewModel(device);
 
     res.render("pages/device", {
+      accessState: derivedAccessState.accessState,
       deviceCode,
       pageTitle: `Device ${deviceCode}`,
       reloadVersion: deviceAuth.reloadVersion || 0,

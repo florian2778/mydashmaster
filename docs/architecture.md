@@ -16,7 +16,7 @@ Responsible for:
 - login
 - managing layouts
 - managing devices
-- approving devices
+- activating a device client explicitly
 - assigning layouts
 
 Access restricted via authentication.
@@ -31,13 +31,13 @@ Admin entry routing:
 ## 2. Public Device Renderer
 
 Route:
-/d/{deviceCode}
+- `/d/{deviceCode}`
 
 Responsibilities:
 - identify device
-- check authorization
-- render layout or pending page
-- run polling for updates
+- derive the current device/browser access state
+- render layout or waiting/error page
+- run polling for updates and session recovery
 
 Routing separation:
 - `/` is not a public device route
@@ -51,35 +51,15 @@ Routing separation:
 File-based storage using JSON files.
 
 Structure:
-data/
-layouts/
-devices/
-device-auth/
-- stores authentication data per device
-- contains hash(deviceSecret)
-- may contain candidateSecretHash for pending devices
-users/
+- `data/layouts/`
+- `data/devices/`
+- `data/device-auth/`
+- `users/`
 
----
-
-## Layout Model
-
-A layout consists of:
-- layoutId
-- layoutVersion
-- options
-- structure
-- boxes
-
-The structure is a recursive tree of nodes:
-- row
-- column
-- box
-
-Boxes define iframe content:
-- name
-- url
-- zoom
+`data/device-auth/` stores:
+- `secretHash`
+- client activity and activation data per device
+- the official heartbeat `lastStatusAt`
 
 ---
 
@@ -88,129 +68,154 @@ Boxes define iframe content:
 A device:
 - has a unique code
 - may have a human-readable description for admin use
-- has a status (pending, approved, revoked)
-  - pending: device not yet approved
-  - approved: device allowed with valid secret
-  - revoked: device explicitly blocked, requires re-approval
+- has a status: `pending`, `approved`, `revoked`
 - is assigned exactly one layout
+
+The active browser context is tracked separately via `device-auth`.
 
 ---
 
-## Device Authorization
+## Device Authorization Layers
 
-- authentication is based on a device-specific secret
-- each device generates a persistent deviceSecret (client-side)
-- server stores only hash(deviceSecret)
-- deviceSecret is the primary authentication factor
+Three layers must stay separate:
 
-- a cookie is used as a temporary validated session
-- cookie does not replace deviceSecret authentication
-- cookie can be revalidated using deviceSecret
+1. Device approval
+- `device.status`
 
-- access requires:
-  - valid deviceCode (routing only)
-  - device status = approved
-  - valid deviceSecret (or valid session cookie)
+2. Official active client
+- `isPairedClient = true`
+- exactly one active client per `deviceCode`
+
+3. Browser session
+- `mydashmaster_device` cookie
+- short-lived, refreshable session token
+
+Additional browser identity tracking:
+- `mydashmaster_device_client`
+- stable browser-profile `clientId`
+- not an auth factor by itself
+
+---
+
+## Access State Model
+
+The public device lifecycle uses these access states:
+- `pending_activation`
+- `active_authorized`
+- `reauth_required`
+- `auth_mismatch`
+- `blocked_by_other_client`
+- `revoked`
+
+These states are derived centrally and must be shared by:
+- `GET /d/{deviceCode}`
+- `GET /api/device/{deviceCode}/status`
+
+### Meaning
+
+- `pending_activation`
+  - real admin wait state
+  - device not approved or no active client selected yet
+- `active_authorized`
+  - approved device, active client, valid session
+  - layout may be rendered
+- `reauth_required`
+  - approved device, active/known client context, but session missing or expired
+  - browser should auto-run `/auth`
+- `auth_mismatch`
+  - client secret/auth evidence no longer matches current server-side `secretHash`
+- `blocked_by_other_client`
+  - another browser is currently the active client
+- `revoked`
+  - hard stop, no automatic recovery
 
 ---
 
 ## Rendering Flow
 
-1. Device calls `/d/{deviceCode}`
-2. Server loads device
-3. Server checks device status
-4. If not approved → pending page
-5. If approved:
-   - validate session cookie if present
-   - otherwise validate deviceSecret
-6. If validation fails → pending page or blocked page
-7. If validation succeeds → render layout
+1. Browser calls `/d/{deviceCode}`
+2. Server loads device and device-auth data
+3. Server validates the current session cookie
+4. Server derives the canonical access state
+5. If `active_authorized`:
+   - render layout
+6. Otherwise:
+   - render the waiting/error page for the derived access state
+
+Important:
+- an expired session cookie must not be treated as missing admin activation
+- it must resolve to `reauth_required` if the browser is otherwise the correct active client context
 
 ---
 
-## Update Mechanism
+## Device API Responsibilities
 
-Devices poll:
-/api/device/{deviceCode}/status
+### `GET /api/device/{deviceCode}/status`
 
-Status responses should expose the assigned layout identity:
-- `layoutId`
-- `layoutVersion`
+Central polling endpoint for:
+- official device heartbeat
+- client activity
+- access checks
+- reload / layout-change detection
 
-Layout identity model:
-- `layoutId` is the immutable technical identifier of a layout
-- `description` is an optional human-readable admin label only
-- changing `description` must not affect device assignment or runtime layout identity
+Status payload should expose:
+- `accessState`
+- `authorized`
+- `hasValidSession`
+- `isActiveClient`
+- `hasActiveClient`
+- `hasCurrentAuthentication`
+- `canAttemptReauth`
+- plus existing compatibility fields while needed
 
-If layout identity changed:
-- different `layoutId`
-- or same `layoutId` with different `layoutVersion`
+### `POST /api/device/{deviceCode}/auth`
 
-then the device updates the visible layout according to the current renderer strategy.
+Used to:
+- validate the `deviceSecret`
+- establish or refresh the session cookie
+- update client auth evidence
 
-Current target strategy:
-- `active -> active` layout identity change:
-  - client-side layout refresh
-- lifecycle/access-state change:
-  - full page reload / server-rendered transition
+Must not:
+- activate a client implicitly
+- write the official heartbeat
+
+### `GET /api/device/{deviceCode}/layout-fragment`
+
+Used only for `active_authorized` clients.
+
+---
+
+## Heartbeat Model
 
 Operational liveness:
-- a later admin-side `Seen` / `Online` indicator should be based on a dedicated heartbeat timestamp
-- this timestamp is the official device heartbeat
-- the official device heartbeat is updated by the active client only
-- heartbeat is separate from authorization and separate from `lastConnectedAt`
-- see `docs/device-heartbeat.md`
+- official heartbeat is `lastStatusAt`
+- only `active_authorized` may advance it
+- heartbeat is separate from approval and separate from `lastConnectedAt`
 
 Client observation:
-- status endpoint handling may also record client activity
-- client activity is a client-level observation, not device-level truth
-- update client activity only for:
-  - known `deviceCode`
-  - syntactically valid request
-  - real device status endpoint request
-- do not update client activity for:
-  - unknown device
-  - malformed request
-  - unrelated endpoints
-- only the active client contributes the official device heartbeat
+- status polling may also update client activity
+- client activity is diagnostic only
+- only the active authorized client contributes the official heartbeat
 
-Client identity:
-- `clientId` is generated server-side
-- `clientId` is stored in a browser cookie
-- `clientId` survives reloads
-- `clientId` is browser-profile scoped, not tab-scoped
-- `clientId` is used only for client activity tracking, not as an auth factor by itself
+See:
+- `docs/device-heartbeat.md`
 
-Authenticated browser session:
-- a valid device session cookie represents an authenticated browser session
-- authenticated browser session is separate from `clientId`
-- authenticated browser session is separate from explicit admin pairing
-- after reset activation, a browser may stay technically authenticated and still remain `pending`
+---
 
-Exclusivity:
-- an active client is the single official client context for one `deviceCode`
-- exactly one client may have `isPairedClient = true` per `deviceCode`
-- when a new client becomes the active client, the previous one must lose `isPairedClient = true` immediately
+## Reset Activation
 
-Separation rule:
-- device-level truth uses the official device heartbeat
-- client-level observation may include additional pending or blocked client activity
-- additional pending or blocked client activity must not change `Seen` or `Online`
-- timestamps remain stored as ISO timestamps; display formatting is a UI concern only
+Current reset behavior:
+- clears the active assignment
+- clears `secretHash`
+- stops the official heartbeat
+- returns known clients to the activation cycle
 
-Post-reset recovery flow:
-1. Admin resets activation
-2. No client remains active
-3. Device status stays `approved`
-4. Current `secretHash` is cleared
-5. Known clients derive to `pending`
-6. Recently active and technically authenticated clients may be activated again immediately
-7. The next activated client defines the new `secretHash`
-8. Only an explicitly activated client may render the layout and update the official device heartbeat
+That is separate from session-expiry recovery.
 
-State decision rule:
-- `pending` means no active client currently exists
-- `blocked` means another active client already exists
+Session expiry recovery should use:
+- `reauth_required`
+- automatic `/auth`
+- no admin action
 
 ---
 
@@ -219,4 +224,4 @@ State decision rule:
 - keep it simple
 - avoid overengineering
 - use server-side rendering
-- prefer readability over abstraction
+- prefer explicit lifecycle semantics over inferred UI guesses

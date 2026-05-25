@@ -1,6 +1,9 @@
 const express = require("express");
 
-const { deriveClientState } = require("../device/client-state");
+const {
+  deriveClientState,
+  deriveDeviceAccessState
+} = require("../device/client-state");
 const { buildDeviceLayoutViewModel } = require("../device/layout-render");
 const {
   clearDeviceSessionCookie,
@@ -8,6 +11,7 @@ const {
   getRequestIp,
   hashDeviceSecret,
   hasValidDeviceSession,
+  renewDeviceSessionCookie,
   setDeviceSessionCookie
 } = require("../auth/device-auth");
 const {
@@ -31,47 +35,53 @@ function buildStatusPayload(req, deviceCode, device, deviceAuth, clientId) {
 
   if (!device) {
     return {
-      clientState: "unknown",
+      accessState: "unknown",
       authorized: false,
+      canAttemptBootstrapAuth: false,
+      canAttemptReauth: false,
+      clientState: "unknown",
       deviceCode,
-      isAuthenticated: false,
+      hasActiveClient: false,
+      hasCurrentAuthentication: false,
+      hasValidSession: false,
+      isActiveClient: false,
       isActivatable: false,
+      isAuthenticated: false,
       layoutId: null,
       reloadVersion,
       status: "unknown"
     };
   }
 
-  if (device.status === "revoked") {
-    return {
-      clientState: "revoked",
-      authorized: false,
-      deviceCode,
-      isAuthenticated: false,
-      isActivatable: false,
-      layoutId: device.layoutId || null,
-      reloadVersion,
-      status: "revoked"
-    };
-  }
-
-  const derivedState = deriveClientState({
+  const validSession = Boolean(
+    deviceAuth?.secretHash && hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash)
+  );
+  const derivedAccessState = deriveDeviceAccessState({
     clientId,
     device,
-    deviceAuth
+    deviceAuth,
+    hasValidSession: validSession
   });
-  const authorized =
-    device.status === "approved" &&
-    derivedState.state === "active" &&
-    Boolean(deviceAuth?.secretHash) &&
-    hasValidDeviceSession(req, deviceCode, deviceAuth.secretHash);
+  const derivedClientState = deriveClientState({
+    clientId,
+    device,
+    deviceAuth,
+    hasValidSession: validSession
+  });
 
   return {
-    clientState: derivedState.state,
-    authorized,
+    accessState: derivedAccessState.accessState,
+    authorized: derivedAccessState.authorized,
+    canAttemptBootstrapAuth: derivedAccessState.canAttemptBootstrapAuth,
+    canAttemptReauth: derivedAccessState.canAttemptReauth,
+    clientState: derivedClientState.state,
     deviceCode,
-    isAuthenticated: derivedState.isAuthenticated,
-    isActivatable: derivedState.isActivatable,
+    hasActiveClient: derivedAccessState.hasActiveClient,
+    hasCurrentAuthentication: derivedAccessState.hasCurrentAuthentication,
+    hasValidSession: derivedAccessState.hasValidSession,
+    isActiveClient: derivedAccessState.isActiveClient,
+    isActivatable: derivedAccessState.isActivatable,
+    isAuthenticated: derivedClientState.isAuthenticated,
     layoutId: device.layoutId || null,
     reloadVersion,
     status: device.status
@@ -83,7 +93,7 @@ router.get("/:deviceCode/status", async (req, res, next) => {
     const { deviceCode } = req.params;
     const clientId = ensureDeviceClientId(req, res);
     const device = await readDevice(deviceCode);
-    let deviceAuth = device ? await readDeviceAuth(deviceCode) : null;
+    const deviceAuth = device ? await readDeviceAuth(deviceCode) : null;
 
     const payload = buildStatusPayload(req, deviceCode, device, deviceAuth, clientId);
 
@@ -102,6 +112,10 @@ router.get("/:deviceCode/status", async (req, res, next) => {
       getRequestIp(req)
     );
 
+    if (payload.authorized === true && deviceAuth?.secretHash) {
+      renewDeviceSessionCookie(req, res, deviceCode, deviceAuth.secretHash);
+    }
+
     return res.json(payload);
   } catch (error) {
     next(error);
@@ -113,7 +127,7 @@ router.get("/:deviceCode/layout-fragment", async (req, res, next) => {
     const { deviceCode } = req.params;
     const clientId = ensureDeviceClientId(req, res);
     const device = await readDevice(deviceCode);
-    let deviceAuth = device ? await readDeviceAuth(deviceCode) : null;
+    const deviceAuth = device ? await readDeviceAuth(deviceCode) : null;
 
     const payload = buildStatusPayload(req, deviceCode, device, deviceAuth, clientId);
 

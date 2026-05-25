@@ -342,30 +342,33 @@ Verwendung in der Devices Übersicht:
   - keine Platzhalterpflicht
   - UI darf Feld weglassen oder neutral `-` anzeigen
 
-#### Konflikt B: Status nur als `online / waiting for approval`
+#### Konflikt B: Lifecycle nur als `online / waiting for approval`
 
-Diese Darstellung ist nicht konsistent mit dem Lifecycle-Modell.
+Diese Darstellung ist nicht konsistent mit dem aktuellen Device-Access-Lifecycle.
 
 Konflikt mit:
 - `docs/device-access-lifecycle.md`
 - `docs/device-heartbeat.md`
+- `docs/architecture.md`
 
-Dort existieren:
+Das aktuelle fachliche Modell trennt:
 - Device-Status:
   - `pending`
   - `approved`
   - `revoked`
-- sichtbare Client-Zustände:
-  - `pending`
-  - `active`
-  - `blocked`
-
-Außerdem muss die UI zwischen Device-Ebene und Client-Ebene trennen:
-
-- official device heartbeat
-- client activity
-- active client
-- additional pending or blocked client activity
+- Access State der öffentlichen Device-Seite:
+  - `pending_activation`
+  - `active_authorized`
+  - `reauth_required`
+  - `auth_mismatch`
+  - `blocked_by_other_client`
+  - `revoked`
+- Device-Level-Wahrheit:
+  - official device heartbeat
+- Client-Level-Diagnostik:
+  - client activity
+  - official active client
+  - additional client activity
 
 ### Device Overview
 
@@ -384,7 +387,7 @@ Formatierung:
 
 Sie zeigt nicht:
 - zusätzliche Browser-Clients
-- additional pending or blocked client activity
+- zusätzliche Access-States einzelner Browser
 
 Wichtige Regel:
 - `Seen` bezieht sich immer auf den official device heartbeat
@@ -403,54 +406,23 @@ Es muss trennen zwischen:
 - Device Actions
 - Danger Zone
 
-Darstellungsmodell:
-- Die Seite ist eine Admin-Konsole für den Device-Betrieb, keine rohe Diagnoseansicht.
-- Primärinformationen stehen oben.
-- diagnostische Rohdaten sind nachgeordnet und einklappbar.
-
 Primäres Anzeige-Statusmodell:
 - `Revoked`
   - wenn `device.status = revoked`
 - `Active · Online`
-  - wenn ein offizieller Client existiert und der official heartbeat frisch ist
+  - wenn offizieller Client existiert und der offizielle Heartbeat frisch ist
 - `Active · Offline`
-  - wenn ein offizieller Client existiert, der official heartbeat aber nicht mehr frisch ist
+  - wenn offizieller Client existiert, aber der Heartbeat nicht mehr frisch ist
 - `Waiting for activation`
-  - wenn kein offizieller Client existiert, aber mindestens ein Client aktivierbar ist
-- `No active client`
-  - wenn kein offizieller Client existiert und kein Client aktuell aktivierbar ist
+  - wenn der relevante Access State `pending_activation` ist
+- `Reauthentication needed`
+  - wenn der relevante Access State `reauth_required` ist
+- `Blocked by other client`
+  - wenn der relevante Access State `blocked_by_other_client` ist
+- `Authentication mismatch`
+  - wenn der relevante Access State `auth_mismatch` ist
 
-Dieses Statusmodell ist rein UI-seitig.
-Es führt keine neuen Backend-Fachzustände ein.
-
-Kopf-Summary:
-- primärer Titel:
-  - `description`, falls vorhanden
-  - sonst `deviceCode`
-- `deviceCode` sichtbar als technische Subline
-- primärer Status-Badge:
-  - aus dem Anzeige-Statusmodell oben
-- kompakte Meta-Zeile:
-  - `Official seen`
-  - `Official client IP`
-  - `Layout`
-  - `Device status`
-
-Wichtige Anzeige-Regeln:
-- `Official seen` ist die primäre Aktivitätsinformation
-- `Official seen` bezieht sich immer auf `lastStatusAt`
-- absolute Timestamps sind im Hauptbereich nicht dominant
-- `lastConnectedAt` gehört nicht in die primäre Summary
-
-Public Device URL:
-- das Device Detail zeigt die Public URL:
-  - absolute URL auf Basis des aktuellen Request-Kontexts
-  - z. B. `https://example.org/d/{deviceCode}`
-- die URL ist sichtbar
-- Aktionen:
-  - `Copy`
-  - `Open`
-- `Open` öffnet die Device-URL in einem neuen Tab
+Dieses Anzeige-Statusmodell bleibt UI-seitig, darf aber die fachlichen Access States nicht verschleiern.
 
 Official Client:
 - eigener klarer Hauptabschnitt
@@ -474,97 +446,25 @@ Other Clients:
 - eigener Abschnitt `Other Clients`
 - Clients werden gruppiert in:
   - `Ready to activate`
-  - `Blocked`
+  - `Blocked by other client`
+  - `Authentication mismatch`
   - `Other pending activity`
 - `Activate` erscheint nur für Clients mit Aktivierbarkeit
-- Hinweise sind zustandsbezogen:
-  - anderer Client ist bereits aktiv
-  - Client hat Authentifizierung noch nicht abgeschlossen
-  - Client-Aktivität ist nicht mehr aktuell genug
-
-IP-Anzeige:
-- sichtbare Primärregel:
-  - wenn ein offizieller Client existiert, ist dessen Client-IP die primäre sichtbare IP
-  - sonst Fallback auf die Device-Level-IP
-- die root-level Device-IP ist nicht die primäre Betriebsanzeige
-- sie bleibt diagnostisch sichtbar
-
-Technical Details:
-- als einklappbarer Bereich
-- enthält Roh- und Diagnosedaten
-- dort dürfen absolute Timestamps und technische Rohfelder sichtbar sein
-- Hinweis:
-  - diese Daten sind diagnostisch und können von der primären Summary abweichen
-- der Offen-/Geschlossen-Zustand soll Reloads derselben Device-Detailseite im Browser überleben
-
-Layout:
-- eigener klarer Abschnitt
-- aktuelles Layout prominent
-- `layoutId` als technische Zweitzeile
-- Layout-Auswahl und Speichern bleiben erhalten
-- keine Vermischung mit Client- oder Statusdiagnostik
-
-Actions:
-- gruppiert in:
-  - `Device Actions`
-    - `Reload`
-    - `Reset activation`
-  - `Danger Zone`
-    - `Revoke`
-    - `Delete`
-- Danger Zone ist visuell getrennt
-- kurze Erklärung:
-  - `Revoke` entfernt aktiven Zugriff, behält aber den Device-Datensatz
-  - `Delete` entfernt den Device-Datensatz dauerhaft
+- ein Client darf erst dann als aktivierbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde und er noch als aktuell aktiv gilt
 
 Wichtige Regel:
-- zusätzliche Clients sind diagnostisch
-- sie sind keine konkurrierenden Device-Zustände
-- `clientId` ist nur Client-Tracking
-- gültige Browser-Session und explizite Admin-Aktivierung sind getrennte Schritte
-- ein Client darf erst dann als aktivierbar gelten, wenn für ihn eine erfolgreiche Authentifizierung / Session-Etablierung dokumentiert wurde und er noch als aktuell aktiv gilt
-- nach `Reset activation` wird die aktive Zuordnung entfernt und der bisherige `secretHash` gelöscht
-- vorhandene authentifizierte Clients bleiben als Kandidaten sichtbar
-- der nächste explizit aktivierte Client definiert den neuen `secretHash`
-- `pending` bedeutet:
-  - aktuell existiert kein active client
-  - Browser darf sich authentifizieren und Session aufbauen
-  - Browser bleibt bis zur expliziten Admin-Aktivierung trotzdem `pending`
-- `blocked` bedeutet:
-  - ein anderer active client existiert bereits
-  - Bootstrap/Auth-Recovery ist in diesem Zustand blockiert
-
-Deshalb reicht die reduzierte Anzeige:
-- online
-- waiting for approval
-
-nicht aus.
-
-### Erforderliche Folgeänderung
-
-Wenn dieses Dokument am einfachen Statusmodell festhalten würde, müsste `device-access-lifecycle.md` vereinfacht werden.
-Das wäre fachlich falsch und wird nicht empfohlen.
+- `reauth_required` ist kein Admin-Fall
+- Session-Ablauf darf nicht als fehlende Aktivierung dargestellt werden
+- `pending_activation` bedeutet echte Admin-/Freigabe-Wartephase
+- `blocked_by_other_client` und `auth_mismatch` dürfen keine Auto-Reauth-Schleife auslösen
+- `revoked` bleibt ein harter Stopp
 
 ### Empfehlung
 
-Die Devices Übersicht sollte stattdessen spezifizieren:
-
-- technische Hauptanzeige:
-  - `status` aus Device JSON:
-    - `pending`
-    - `approved`
-    - `revoked`
-- zusätzliche Pairing-Anzeige:
-  - `active`
-  - `pending`
-- Diagnosehinweise:
-  - letzter Kontakt
-  - letzte IP
-
-Wichtige Ergänzung:
-- ein späteres `online`-Badge darf nicht aus `lastConnectedAt` abgeleitet werden
-- dafür ist ein separates Heartbeat-Feld erforderlich
-- siehe `docs/device-heartbeat.md`
+Die Device-UI soll deshalb künftig:
+- Device-Level-Liveness über `Seen` / optional `Online` zeigen
+- Access-State-Texte klar von Heartbeat/Liveness trennen
+- Session-Recovery als `reauth_required` sichtbar machen, nicht als fehlende Aktivierung
 
 ### Weitere Lücke
 

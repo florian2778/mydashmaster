@@ -33,6 +33,22 @@ function hasCurrentAuthentication(device, deviceAuth, client) {
   return client.sessionSecretHash === deviceAuth.secretHash;
 }
 
+function hasAuthenticationMismatch(device, deviceAuth, client) {
+  if (!device || device.status === "revoked") {
+    return false;
+  }
+
+  if (!client?.lastAuthenticatedAt || !client?.sessionSecretHash) {
+    return false;
+  }
+
+  if (!deviceAuth?.secretHash) {
+    return false;
+  }
+
+  return client.sessionSecretHash !== deviceAuth.secretHash;
+}
+
 function isRecentlySeen(client, now = Date.now()) {
   if (!client?.lastSeenAt) {
     return false;
@@ -56,40 +72,102 @@ function isRecentlySeen(client, now = Date.now()) {
   return now - lastSeenAt <= pollIntervalMs * ACTIVATABLE_ACTIVITY_MULTIPLIER;
 }
 
-function deriveClientState({ device, deviceAuth, clientId }) {
+function deriveDeviceAccessState({
+  device,
+  deviceAuth,
+  clientId,
+  hasValidSession = false
+}) {
   const client = getClient(deviceAuth, clientId);
-  const pairedClient = getPairedClient(deviceAuth);
-  const isAuthenticated = hasCurrentAuthentication(device, deviceAuth, client);
+  const activeClient = getPairedClient(deviceAuth);
+  const hasCurrentAuth = hasCurrentAuthentication(device, deviceAuth, client);
+  const hasAuthMismatch = hasAuthenticationMismatch(device, deviceAuth, client);
   const isRecentlyActive = isRecentlySeen(client);
-  const hasPairedClient = Boolean(pairedClient);
-  const isPairedClient = Boolean(client?.isPairedClient);
+  const hasActiveClient = Boolean(activeClient);
+  const isActiveClient = Boolean(client?.isPairedClient);
+  const approved = device?.status === "approved";
+  let accessState = "pending_activation";
+  let authorized = false;
+  let canAttemptBootstrapAuth = false;
+  let canAttemptReauth = false;
 
-  let state = "pending";
-
-  if (isPairedClient) {
-    state = "active";
-  } else if (hasPairedClient) {
-    state = "blocked";
+  if (device?.status === "revoked") {
+    accessState = "revoked";
+  } else if (!approved || !hasActiveClient) {
+    accessState = "pending_activation";
+    canAttemptBootstrapAuth = Boolean(!hasAuthMismatch && !hasCurrentAuth);
+  } else if (!isActiveClient) {
+    accessState = hasAuthMismatch ? "auth_mismatch" : "blocked_by_other_client";
+  } else if (hasValidSession) {
+    accessState = "active_authorized";
+    authorized = true;
+  } else if (hasAuthMismatch) {
+    accessState = "auth_mismatch";
+  } else {
+    accessState = "reauth_required";
+    canAttemptReauth = Boolean(
+      approved &&
+        isActiveClient &&
+        deviceAuth?.secretHash &&
+        (hasCurrentAuth || !client?.lastAuthenticatedAt)
+    );
   }
 
   return {
+    accessState,
+    activeClient,
+    authorized,
+    canAttemptBootstrapAuth,
+    canAttemptReauth,
     client,
-    hasPairedClient,
-    isAuthenticated,
+    hasActiveClient,
+    hasCurrentAuthentication: hasCurrentAuth,
+    hasValidSession,
+    isActiveClient,
     isActivatable:
       device?.status !== "revoked" &&
-      state === "pending" &&
-      isAuthenticated &&
+      accessState === "pending_activation" &&
+      hasCurrentAuth &&
       isRecentlyActive,
-    isRecentlyActive,
-    pairedClient,
+    isAuthenticationMismatch: hasAuthMismatch,
+    isRecentlyActive
+  };
+}
+
+function deriveClientState({ device, deviceAuth, clientId, hasValidSession = false }) {
+  const derivedAccessState = deriveDeviceAccessState({
+    clientId,
+    device,
+    deviceAuth,
+    hasValidSession
+  });
+
+  let state = "pending";
+
+  if (derivedAccessState.accessState === "active_authorized") {
+    state = "active";
+  } else if (derivedAccessState.accessState === "blocked_by_other_client") {
+    state = "blocked";
+  } else if (derivedAccessState.accessState === "revoked") {
+    state = "revoked";
+  }
+
+  return {
+    client: derivedAccessState.client,
+    hasPairedClient: derivedAccessState.hasActiveClient,
+    isAuthenticated: derivedAccessState.hasCurrentAuthentication,
+    isActivatable: derivedAccessState.isActivatable,
+    isRecentlyActive: derivedAccessState.isRecentlyActive,
+    pairedClient: derivedAccessState.activeClient,
     state
   };
 }
 
 module.exports = {
+  deriveDeviceAccessState,
   deriveClientState,
   getClient,
   getPairedClient,
+  hasAuthenticationMismatch,
   hasCurrentAuthentication
 };

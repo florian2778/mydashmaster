@@ -2,12 +2,12 @@
 
 ## Goal
 
-Define one clear heartbeat model for device presence so the admin UI can later show:
+Define one clear heartbeat model for device presence so the admin UI can show:
 - `online`
 - `offline`
 - `last seen`
 
-without overloading existing fields such as `lastConnectedAt`.
+without overloading `lastConnectedAt` or the device access state.
 
 Polling remains the source of truth.
 
@@ -27,16 +27,13 @@ Meaning:
 - source of official `Seen`
 - future source of `Online`
 
-Format:
-- full ISO timestamp string
-
 Important rule:
-- ONLY the active client updates `lastStatusAt`
+- ONLY the client in `active_authorized` updates `lastStatusAt`
 
 This means:
 - `Seen` always refers to `lastStatusAt`
-- additional pending or blocked client activity must never affect `Seen`
-- additional pending or blocked client activity must never affect `Online`
+- client activity in `pending_activation`, `reauth_required`, `auth_mismatch`, `blocked_by_other_client`, or `revoked` must never affect `Seen`
+- those client states must never affect `Online`
 
 ---
 
@@ -46,19 +43,20 @@ Two concepts must stay separate:
 
 - official device heartbeat
   - represented by `lastStatusAt`
-  - written only by the active client
+  - written only by the active authorized client
   - device-level truth
 
 - client activity
   - represented per `clientId` in `clients[]`
   - diagnostic observation only
-  - may include the active client and additional pending or blocked client activity
+  - may include the active client and additional non-active clients
 
 Client activity fields:
 - `lastSeenAt`
 - `lastAuthenticatedAt`
 - `userAgent`
 - `lastKnownIp`
+- `sessionSecretHash`
 
 Important rule:
 - `clients[].lastSeenAt` is diagnostic only
@@ -66,34 +64,28 @@ Important rule:
 
 ---
 
-## Authentication and Pairing
+## Access States and Heartbeat
 
-Authentication remains required technically, but it is not a visible primary business state.
+The device lifecycle distinguishes these access states:
+- `pending_activation`
+- `active_authorized`
+- `reauth_required`
+- `auth_mismatch`
+- `blocked_by_other_client`
+- `revoked`
 
-Three layers must stay separate:
+Heartbeat rule:
+- only `active_authorized` may advance `lastStatusAt`
 
-- `clientId`
-  - server-generated
-  - stored in a browser cookie
-  - browser-profile scoped
-  - used only for client activity tracking
-
-- authenticated browser session
-  - represented by a valid device session cookie plus stored client auth evidence
-  - technical prerequisite only
-
-- active client
-  - represented by `isPairedClient = true`
-  - single official client context for one `deviceCode`
-
-Exactly one client may have `isPairedClient = true` per `deviceCode`.
-
-When a new client becomes active:
-- the previous active client loses `isPairedClient = true` immediately
+Consequences:
+- `reauth_required` stops the official heartbeat until session recovery succeeds
+- an expired session cookie does not change admin approval by itself
+- `blocked_by_other_client` remains diagnostic only
+- `auth_mismatch` remains diagnostic only
 
 ---
 
-## Update Rules
+## Status Endpoint Responsibility
 
 `GET /api/device/{deviceCode}/status` is the central endpoint for:
 - official device heartbeat
@@ -114,31 +106,34 @@ Client activity update rule:
 Official heartbeat update rule:
 - update `lastStatusAt` only if:
   - the request is on the real status endpoint
-  - the device is approved
-  - the requesting client is the active client
-  - the requesting browser session is technically valid for the current secret cycle
+  - the resolved access state is `active_authorized`
+  - `authorized === true`
 
 `POST /api/device/{deviceCode}/auth` must:
 - validate the secret
 - establish or refresh the device session cookie
 - update `lastAuthenticatedAt` for the requesting client
 - not write `lastStatusAt`
-- not pair the client
+- not activate the client
 
 ---
 
-## Reset Activation
+## Session Recovery Interaction
 
-Reset activation must:
-- remove the current official active assignment
-- clear the current `secretHash`
+A short-lived session cookie is allowed.
 
-After reset:
-- no client is active
-- all known clients derive to `pending`
-- technically authenticated and recently seen clients may be activatable again immediately
-- the next activated client defines the new `secretHash`
-- `lastStatusAt` must stop advancing until a new active client exists
+If the browser still has:
+- a stable `clientId`
+- a matching stored `sessionSecretHash`
+- and local `deviceSecret`
+
+but the session cookie is missing or expired, the correct access state is:
+- `reauth_required`
+
+In that state:
+- the browser should automatically retry `/auth`
+- `lastStatusAt` remains stopped until reauth succeeds
+- no manual admin re-activation should be required
 
 ---
 
@@ -151,7 +146,7 @@ With current default polling:
 - `DEVICE_POLL_INTERVAL_MS = 10000`
 - recommended threshold: `30s`
 
-`online` must never imply authentication or pairing.
+`online` must never imply pairing or authentication.
 
 ---
 
@@ -172,78 +167,9 @@ Device Detail:
 - Official Active Client:
   - `Seen` relative
   - absolute timestamp optional as secondary information
-- Additional Pending / Blocked Client Activity:
+- Additional Client Activity:
   - `lastSeenAt` absolute by default
 
 Important rule:
 - `Seen` always refers to `lastStatusAt`
-- additional pending or blocked client activity remains diagnostic only
-
-## Device State Interaction
-
-The heartbeat should remain separate from device lifecycle state.
-
-Examples:
-
-- active client + recent `lastStatusAt`
-  - official device heartbeat is current
-  - device may be shown as recently seen / online
-
-- additional pending or blocked client activity in `pending`
-  - browser activity exists
-  - but `Seen` and `Online` remain unchanged
-
-- additional pending or blocked client activity in `blocked`
-  - browser activity exists
-  - but `Seen` and `Online` remain unchanged
-
-- additional pending or blocked client activity in `revoked`
-  - browser activity exists
-  - but `Seen` and `Online` remain unchanged
-
-Therefore:
-- `online` must never imply pairing or technical authentication
-
----
-
-## Admin UI Recommendation
-
-For MVP:
-- add `Seen` first
-- postpone a strong `Online` badge until the heartbeat field exists and is stable
-
-If an `Online` badge is later added:
-- keep it subtle
-- show it only as a derived operational state
-- do not mix it into pairing/auth status
-
----
-
-## Implementation Guidance
-
-Minimal implementation sequence:
-
-1. Add `lastStatusAt` as an optional field in device-auth validation/docs
-2. Add optional `clients[]` tracking for client activity
-3. Update the device status endpoint to:
-   - write the official device heartbeat for the active client only
-   - write client activity for valid status requests only
-4. Expose `lastStatusAt` in admin device listing data
-5. Show `Seen` based on `lastStatusAt`
-6. Optionally derive `Online` from the threshold rule
-
-This keeps the rollout incremental and avoids misleading UI.
-
----
-
-## Non-Goals
-
-This document does not require:
-- precise network reachability detection
-- websocket presence
-- multi-tab/browser session counting
-- historical heartbeat logs
-- cluster/multi-instance coordination
-
-The goal is only:
-- honest, simple liveness information for the existing single-instance polling model
+- non-official client activity remains diagnostic only

@@ -1,135 +1,99 @@
 # Device Access Lifecycle & Admin UX
 
-## Ziel
+## Goal
 
 Saubere Definition der Zustände, Übergänge und Admin-Interaktionen für Device-Zugriffe.
 
 ---
 
-## Device- und Client-Ebene
+## Ebenen
 
-Es gibt zwei Ebenen:
+Es gibt drei getrennte Ebenen:
 
 - Device-Ebene
   - `device.status`: `pending`, `approved`, `revoked`
 - Client-Ebene
-  - sichtbarer Client-Zustand: `pending`, `active`, `blocked`
+  - offizieller aktiver Client über `isPairedClient`
+- Session-Ebene
+  - gültiges Device-Session-Cookie `mydashmaster_device`
 
 Mehrere Browser-Clients pro `deviceCode` sind möglich.
 
 Wichtige Regel:
-- genau EIN active client existiert
-- weitere Browser sind client-level observations
-- diese sind keine konkurrierenden Device-Zustände
+- genau EIN aktiver Client existiert
+- weitere Browser sind diagnostische Client-Beobachtungen
+- ein abgelaufenes Session-Cookie ist kein Admin-Fall
 
 ---
 
-## Sichtbare Client-Zustände
+## Sichtbare Access States
 
-### pending
+Die sichtbare Device-/Browser-Seite arbeitet mit diesen Access States:
 
-- dieser Client ist nicht aktiv
-- aktuell existiert für dieses Device noch kein active client
-- Bootstrap/Auth ist erlaubt
-- ein erfolgreicher Auth-Aufbau macht den Client nur aktivierbar, nicht sofort offiziell
+### `pending_activation`
 
-### active
+- echte Admin-/Aktivierungswartephase
+- gilt wenn:
+  - `device.status !== "approved"`
+  - oder noch kein aktiver Client existiert
+- das Layout wird nicht angezeigt
+- technischer Auth-Aufbau darf im Hintergrund stattfinden
 
-- dieser Client ist der offizielle active client für das Device
-- nur dieser Client darf das Layout sehen
-- nur dieser Client darf den official device heartbeat fortschreiben
+### `active_authorized`
 
-### blocked
+- Device ist `approved`
+- dieser Browser ist der aktive Client
+- Session-Cookie ist gültig
+- das Layout darf angezeigt werden
+- nur in diesem Zustand darf `lastStatusAt` fortgeschrieben werden
 
-- dieser Client ist nicht aktiv
-- ein anderer Client ist bereits der active client
-- kein Bootstrap/Re-Activation automatisch
-- Recovery nur über Admin-Aktion
+### `reauth_required`
 
-### revoked
+- Device ist `approved`
+- dieser Browser ist weiterhin der relevante aktive/zugehörige Client
+- aber das Session-Cookie fehlt oder ist abgelaufen
+- der Browser soll automatisch `/api/device/{deviceCode}/auth` mit dem lokalen `deviceSecret` versuchen
+- das ist kein Admin-Fall
 
-- Device-Zugriff vollständig entzogen
+### `auth_mismatch`
+
+- Browser/Client-Kontext passt nicht mehr zum aktuellen `secretHash`
+- automatischer Reauth-Versuch darf hier nicht endlos wiederholt werden
+- Recovery erfordert einen bewusst neuen Secret-/Client-Kontext
+
+### `blocked_by_other_client`
+
+- ein anderer Browser ist bereits der aktive Client
+- dieser Browser darf das Layout nicht anzeigen
+- kein automatischer Reauth-/Bootstrap-Loop
+
+### `revoked`
+
+- harter Stopp
 - kein Bootstrap
-- kein Zugriff
+- kein automatisches Recovery
 
 ---
 
-## Wichtige Regeln
+## Entscheidungslogik
 
-- approved allein reicht nicht
-- Layoutzugriff erfordert:
-  - active client
-  - gültige technische Authentifizierung für den aktuellen Secret-Zyklus
-- Authentication ist technische Voraussetzung, nicht Hauptzustand
-- Aktivierung ist immer eine explizite Admin-Entscheidung
-- blocked darf nie automatisch re-aktivieren
+`GET /d/{deviceCode}` und `GET /api/device/{deviceCode}/status` müssen dieselbe zentrale Ableitung verwenden.
 
----
+Fachlich gilt:
 
-## Mehrere Browser-Clients pro deviceCode
-
-Mehrere Browser-Clients können gleichzeitig sichtbar sein.
-
-Dabei gilt:
-- genau ein Client darf `isPairedClient = true` haben
-- wenn ein neuer Client aktiviert wird, verliert der bisherige Client `isPairedClient = true` sofort
-- alle nicht aktiven Clients sind entweder:
-  - `pending`, wenn noch kein offizieller Client existiert
-  - `blocked`, wenn bereits ein offizieller Client existiert
-
-Diese zusätzlichen Browser sind:
-- additional pending or blocked client activity
-
-Sie bleiben diagnostisch und dürfen nie:
-- `Seen` verändern
-- `Online` verändern
-- offiziellen Device-Zustand redefinieren
-
----
-
-## Waiting Page Verhalten
-
-### Device pending
-
-- Device ist noch nicht freigegeben
-- Bootstrap aktiv
-- Polling aktiv
-- Approval allein darf noch keinen Wechsel ins Layout auslösen
-
-### Client pending
-
-- Device ist freigegeben
-- aktuell gibt es keinen offiziellen aktiven Client
-- Bootstrap/Auth ist erlaubt
-- erfolgreicher Auth-Call:
-  - setzt oder erneuert die Session
-  - aktualisiert `lastAuthenticatedAt`
-  - lässt den sichtbaren Zustand trotzdem `pending`
-- offizieller Zugriff entsteht erst nach expliziter Admin-Aktivierung
-
-### blocked
-
-- anderer Client ist bereits offiziell aktiv
-- kein Auto-Bootstrap
-- Reload nur bei Zustandswechsel
-
----
-
-## Reset Activation
-
-Reset activation muss:
-- den aktuellen offiziellen Aktivierungszustand entfernen
-- für alle Clients:
-  - `isPairedClient = false`
-- `secretHash` entfernen
-
-Nach Reset:
-- kein Client ist aktiv
-- alle bekannten Clients leiten zu `pending` ab
-- das Layout verschwindet überall
-- bekannte technisch authentifizierte Clients dürfen technisch authentifiziert bleiben
-- solche Clients dürfen sofort wieder direkt aktiviert werden, wenn sie noch aktuell aktiv sind
-- beim nächsten `Activate` wird der `sessionSecretHash` des gewählten Clients zum neuen `secretHash`
+1. `device.status = revoked`
+   - `revoked`
+2. `device.status != approved`
+   - `pending_activation`
+3. `device.status = approved` und kein aktiver Client existiert
+   - `pending_activation`
+4. aktiver Client existiert, aktueller Browser ist nicht dieser Client
+   - `blocked_by_other_client`
+   - oder `auth_mismatch`, wenn gespeicherte Auth-Evidence nicht mehr zum aktuellen `secretHash` passt
+5. aktueller Browser ist aktiver Client, aber Session fehlt
+   - `reauth_required`
+6. aktueller Browser ist aktiver Client und Session ist gültig
+   - `active_authorized`
 
 ---
 
@@ -137,38 +101,77 @@ Nach Reset:
 
 Aktivierung bleibt explizit.
 
-Empfohlener Ablauf:
-1. Browser öffnet `/d/:deviceCode`
-2. Browser authentifiziert sich technisch über `/api/device/:deviceCode/auth`
-3. Browser bleibt sichtbar `pending`
-4. Admin sieht diesen Client in der Detailansicht
-5. Admin führt `Activate` aus
-6. Der gewählte Client wird `active`
-7. Alle anderen Clients werden `blocked`
+1. Browser öffnet `/d/{deviceCode}`
+2. Browser kann technisch `/api/device/{deviceCode}/auth` verwenden
+3. ohne aktiven Client bleibt der sichtbare Zustand `pending_activation`
+4. Admin wählt explizit `Activate`
+5. der gewählte Client wird aktiv
+6. derselbe Browser geht nach gültiger Session in `active_authorized`
+7. alle anderen Browser werden `blocked_by_other_client`
 
 ---
 
-## Admin Panel Anforderungen
+## Session Recovery
 
-Referenz für Heartbeat/Liveness:
-- `docs/device-heartbeat.md`
+Wichtige Regel:
+- das Session-Cookie darf kurzlebig sein
+- sein Ablauf darf keinen manuellen Admin-Fall erzeugen
 
-Device Overview zeigt:
-- Device-Status
-- Aktivierungszustand auf Device-Ebene
-- `Seen` aus dem official device heartbeat
-- keine additional pending or blocked client activity
+Daher gilt:
+- wenn ein Device `approved` ist
+- der Browser weiterhin der relevante aktive Client ist
+- aber `mydashmaster_device` fehlt oder abgelaufen ist
+- dann ist der korrekte Zustand `reauth_required`
+- die Browser-Seite soll automatisch `/auth` mit dem lokalen `deviceSecret` versuchen
+
+Kein automatisches Recovery bei:
+- `auth_mismatch`
+- `blocked_by_other_client`
+- `revoked`
+
+---
+
+## Reset Activation
+
+Reset activation bedeutet aktuell:
+- aktive Client-Zuordnung entfernen
+- `isPairedClient = false` für alle Clients
+- `secretHash` entfernen
+- `lastStatusAt` stoppen
+
+Danach:
+- kein Client ist aktiv
+- alle bekannten Clients leiten zu `pending_activation` ab
+- das Layout verschwindet überall
+- beim nächsten erfolgreichen Aktivieren startet ein neuer aktiver Zyklus
+
+---
+
+## Admin UI Bedeutung
+
+Device Overview zeigt nur Device-Level-Wahrheit:
+- `Seen` aus `lastStatusAt`
+- keine zusätzlichen Clients
 
 Device Detail trennt:
-- Official Active Client
-- Additional Pending / Blocked Client Activity
+- offiziellen aktiven Client
+- zusätzliche Client-Aktivität
+- Aktivierbarkeit
+- technische Details
+
+Zusätzliche Clients bleiben diagnostisch und dürfen nie:
+- `Seen` verändern
+- `Online` verändern
+- den offiziellen Device-Zustand redefinieren
 
 ---
 
 ## Minimale Testfälle
 
-1. Pending Device → technischer Auth-Aufbau → explizite Aktivierung
-2. Active Client → Reset activation → alle Clients wieder `pending`
-3. Zweiter Browser bei bestehender Aktivierung → `blocked`
-4. Mehrere `pending` Clients → Admin wählt explizit einen aus
-5. Nur active Client schreibt `lastStatusAt`
+1. `pending_activation` bei nicht freigegebenem Device
+2. `pending_activation` bei approved Device ohne aktiven Client
+3. `active_authorized` nur mit aktivem Client + gültiger Session
+4. `reauth_required` bei aktivem Client ohne Session-Cookie
+5. `auth_mismatch` ohne Auto-Reauth-Schleife
+6. `blocked_by_other_client` ohne Layoutzugriff
+7. nur `active_authorized` schreibt `lastStatusAt`

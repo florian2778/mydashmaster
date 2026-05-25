@@ -136,25 +136,25 @@ Rules:
 - `lastStatusAt` = official device heartbeat.
 - `clients[].lastSeenAt` = diagnostic only.
 - `clients[].lastAuthenticatedAt` = authenticated browser session evidence only.
-- additional pending or blocked client activity must not redefine `Seen` or `Online`.
 - `clients[]` stores client activity, not device-level truth.
-- visible client state is derived, not persisted:
-  - `active`
-  - `pending`
-  - `blocked`
+- visible access state is derived, not persisted:
+  - `pending_activation`
+  - `active_authorized`
+  - `reauth_required`
+  - `auth_mismatch`
+  - `blocked_by_other_client`
+  - `revoked`
 
-Session and pairing rules:
+Session and activation rules:
 - `clientId` identifies the browser profile for client activity tracking only.
-- a valid device session cookie represents an authenticated browser session.
-- `isPairedClient = true` represents explicit admin activation only.
-- after reset activation, a browser may stay technically authenticated and still remain visible `pending`.
-- reset activation clears the current `secretHash` and opens a new activation cycle.
-- explicit admin activation requires a client with recorded `lastAuthenticatedAt`, stored `sessionSecretHash`, and recent activity.
-- after reset activation, the selected client defines the new `secretHash`.
-- only a client that is both:
-  - authenticated via valid device session
-  - explicitly activated via `isPairedClient = true`
-  may update the official heartbeat and render the layout
+- a valid device session cookie represents the current browser session only.
+- `isPairedClient = true` represents the explicitly activated client only.
+- `pending_activation` means true admin/activation wait, not session expiry.
+- `reauth_required` means the browser is still the correct active/known client context, but the short-lived session cookie is missing or expired.
+- `auth_mismatch` means the browser no longer matches the current server-side `secretHash`.
+- `blocked_by_other_client` means another browser is already the active client.
+- only a client in `active_authorized` may render the layout and update the official heartbeat.
+- additional client activity in `pending_activation`, `reauth_required`, `auth_mismatch`, `blocked_by_other_client`, or `revoked` must not redefine `Seen` or `Online`.
 
 Client activity update rule:
 - update `clients[].lastSeenAt` only for:
@@ -177,17 +177,24 @@ Retention / cleanup:
 
 - On first contact:
   - client sends deviceSecret
-  - server stores candidateSecretHash
-
-- On approval:
-  - candidateSecretHash becomes secretHash
-  - candidateSecretHash may be removed
+  - server may store candidateSecretHash in legacy approval flows
 
 - On authentication:
-  - hash(deviceSecret) must match secretHash
+  - hash(deviceSecret) must match the current `secretHash`
+  - successful `/auth` refreshes browser-session evidence and the short-lived session cookie
+
+- On active rendering:
+  - the browser must be the explicitly activated client
+  - and it must have a valid current session cookie
+  - only then the derived state is `active_authorized`
+
+- On session expiry:
+  - the browser may fall to `reauth_required`
+  - automatic `/auth` should restore the session without a new admin activation
 
 - On revocation:
-  - secretHash is removed or invalidated
+  - `secretHash` is removed or invalidated
+  - the visible access state becomes `revoked`
   - device loses access immediately
 
 ---

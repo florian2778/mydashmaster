@@ -10,7 +10,7 @@
     <main class="pending-wrap">
       <p>Device</p>
       <p><code><%= deviceCode %></code></p>
-      <% if (clientState === "pending" && clientId) { %>
+      <% if (accessState === "pending_activation" && clientId) { %>
         <p>Client ID</p>
         <p><code><%= clientId %></code></p>
       <% } %>
@@ -20,21 +20,40 @@
     <% if (shouldPoll) { %>
       <script>
         (async () => {
+          const currentAccessState = <%- JSON.stringify(accessState || null) %>;
           const currentClientState = <%- JSON.stringify(clientState) %>;
           const approvedDeviceStatus = "approved";
+          const deviceCode = <%- JSON.stringify(deviceCode) %>;
           const initialDeviceStatus = <%- JSON.stringify(deviceStatus || null) %>;
-          const storageKey = "mydashmaster-device-secret";
           const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
-          const initialIsAuthenticated = <%- JSON.stringify(Boolean(isAuthenticated)) %>;
-          const initialIsActivatable = <%- JSON.stringify(Boolean(isActivatable)) %>;
           let isChecking = false;
           let currentDeviceStatus = initialDeviceStatus;
-          let currentIsAuthenticated = initialIsAuthenticated;
-          let currentIsActivatable = initialIsActivatable;
+          let currentHasCurrentAuthentication = <%- JSON.stringify(Boolean(hasCurrentAuthentication)) %>;
+          let currentHasValidSession = <%- JSON.stringify(Boolean(hasValidSession)) %>;
+          let currentIsActivatable = <%- JSON.stringify(Boolean(isActivatable)) %>;
+          let currentCanAttemptBootstrapAuth = <%- JSON.stringify(Boolean(canAttemptBootstrapAuth)) %>;
+          let currentCanAttemptReauth = <%- JSON.stringify(Boolean(canAttemptReauth)) %>;
+          let lastSeenAccessState = currentAccessState;
+          let authRetryBlocked = false;
           const messageElement = document.getElementById("device-state-message");
           const noteElement = document.getElementById("device-state-note");
 
-          function createDeviceSecret() {
+          function getScopedDeviceSecretKey(currentDeviceCode) {
+            return `mydashmaster-device-secret:${currentDeviceCode}`;
+          }
+
+          function getLegacyDeviceSecretKey() {
+            return "mydashmaster-device-secret";
+          }
+
+          function persistScopedDeviceSecret(currentDeviceCode, deviceSecret) {
+            window.localStorage.setItem(
+              getScopedDeviceSecretKey(currentDeviceCode),
+              deviceSecret
+            );
+          }
+
+          function generateDeviceSecret() {
             const bytes = new Uint8Array(32);
             window.crypto.getRandomValues(bytes);
             return Array.from(bytes, (byte) =>
@@ -42,15 +61,35 @@
             ).join("");
           }
 
-          function getDeviceSecret() {
-            let deviceSecret = window.localStorage.getItem(storageKey);
+          function readDeviceSecretCandidate(currentDeviceCode) {
+            const scopedDeviceSecret = window.localStorage.getItem(
+              getScopedDeviceSecretKey(currentDeviceCode)
+            );
 
-            if (!deviceSecret) {
-              deviceSecret = createDeviceSecret();
-              window.localStorage.setItem(storageKey, deviceSecret);
+            if (scopedDeviceSecret) {
+              return {
+                secret: scopedDeviceSecret,
+                source: "scoped"
+              };
             }
 
-            return deviceSecret;
+            const legacyDeviceSecret = window.localStorage.getItem(
+              getLegacyDeviceSecretKey()
+            );
+
+            if (legacyDeviceSecret) {
+              return {
+                secret: legacyDeviceSecret,
+                source: "legacy"
+              };
+            }
+
+            const newDeviceSecret = generateDeviceSecret();
+            persistScopedDeviceSecret(currentDeviceCode, newDeviceSecret);
+            return {
+              secret: newDeviceSecret,
+              source: "new"
+            };
           }
 
           async function requestBootstrap(deviceSecret) {
@@ -72,7 +111,8 @@
 
             return {
               ok: response.ok,
-              payload
+              payload,
+              status: response.status
             };
           }
 
@@ -85,8 +125,36 @@
             return response.json();
           }
 
-          function updatePendingCopy() {
-            if (!messageElement || !noteElement || currentClientState !== "pending") {
+          function updatePendingCopy(accessState) {
+            if (!messageElement || !noteElement) {
+              return;
+            }
+
+            if (accessState === "reauth_required") {
+              messageElement.textContent = "Reconnecting session";
+              noteElement.textContent =
+                "This browser is known but needs to refresh its device session. Leave this page open.";
+              return;
+            }
+
+            if (accessState === "auth_mismatch") {
+              messageElement.textContent = "Authentication mismatch";
+              noteElement.textContent =
+                "This browser no longer matches the current device secret. Reconnect it from the active browser context or ask an admin for help.";
+              return;
+            }
+
+            if (accessState === "blocked_by_other_client") {
+              messageElement.textContent = "This browser is not the active one";
+              noteElement.textContent =
+                "Another browser is currently active for this device. Ask an admin to switch activation if needed.";
+              return;
+            }
+
+            if (accessState === "revoked") {
+              messageElement.textContent = "Access revoked";
+              noteElement.textContent =
+                "This device no longer has access. Please contact an administrator.";
               return;
             }
 
@@ -104,7 +172,7 @@
               return;
             }
 
-            if (currentIsAuthenticated) {
+            if (currentHasCurrentAuthentication) {
               messageElement.textContent = "Waiting for activation";
               noteElement.textContent =
                 "This browser is authenticated. Keep this page open while an admin activates it.";
@@ -116,6 +184,22 @@
               "This browser is establishing access in the background. Leave this page open.";
           }
 
+          function shouldAttemptAuth(accessState) {
+            if (authRetryBlocked) {
+              return false;
+            }
+
+            if (accessState === "reauth_required") {
+              return currentCanAttemptReauth === true;
+            }
+
+            if (accessState === "pending_activation") {
+              return currentCanAttemptBootstrapAuth === true;
+            }
+
+            return false;
+          }
+
           async function checkPendingState() {
             if (isChecking) {
               return;
@@ -124,41 +208,63 @@
             isChecking = true;
 
             try {
-              if (<%= shouldBootstrap ? "true" : "false" %> && !currentIsAuthenticated) {
-                const deviceSecret = getDeviceSecret();
-                const authResult = await requestBootstrap(deviceSecret);
+              if (<%= shouldBootstrap ? "true" : "false" %> && shouldAttemptAuth(lastSeenAccessState)) {
+                const secretCandidate = readDeviceSecretCandidate(deviceCode);
+                const authResult = await requestBootstrap(secretCandidate.secret);
 
                 if (authResult.ok) {
-                  currentIsAuthenticated = true;
+                  if (secretCandidate.source === "legacy") {
+                    persistScopedDeviceSecret(deviceCode, secretCandidate.secret);
+                  }
+                  currentHasCurrentAuthentication = true;
+                  currentHasValidSession = true;
+                  authRetryBlocked = false;
+                } else if (
+                  authResult.status === 401 ||
+                  authResult.payload?.status === "unauthorized" ||
+                  authResult.payload?.accessState === "auth_mismatch"
+                ) {
+                  authRetryBlocked = true;
                 }
               }
 
               const statusPayload = await requestStatus();
 
-              if (!statusPayload || typeof statusPayload.clientState !== "string") {
+              if (!statusPayload || typeof statusPayload.accessState !== "string") {
                 return;
               }
 
               currentDeviceStatus = statusPayload.status || currentDeviceStatus;
-              currentIsAuthenticated = statusPayload.isAuthenticated === true;
+              currentHasCurrentAuthentication =
+                statusPayload.hasCurrentAuthentication === true;
+              currentHasValidSession = statusPayload.hasValidSession === true;
+              const previousAccessState = lastSeenAccessState;
               currentIsActivatable = statusPayload.isActivatable === true;
-              updatePendingCopy();
-
-              if (statusPayload.clientState === "active" && statusPayload.authorized === true) {
-                window.location.reload();
-                return;
-              }
+              currentCanAttemptBootstrapAuth =
+                statusPayload.canAttemptBootstrapAuth === true;
+              currentCanAttemptReauth = statusPayload.canAttemptReauth === true;
+              lastSeenAccessState = statusPayload.accessState;
+              updatePendingCopy(statusPayload.accessState);
 
               if (
-                statusPayload.clientState === "revoked" ||
-                statusPayload.clientState === "unknown"
+                statusPayload.accessState === "active_authorized" &&
+                statusPayload.authorized === true
               ) {
                 window.location.reload();
                 return;
               }
 
-              if (statusPayload.clientState !== currentClientState) {
+              if (
+                statusPayload.accessState === "revoked" ||
+                statusPayload.status === "unknown"
+              ) {
                 window.location.reload();
+                return;
+              }
+
+              if (statusPayload.accessState !== previousAccessState) {
+                window.location.reload();
+                return;
               }
             } catch (error) {
               console.error(error);
@@ -168,7 +274,7 @@
           }
 
           try {
-            updatePendingCopy();
+            updatePendingCopy(lastSeenAccessState || currentClientState);
             await checkPendingState();
             window.setInterval(checkPendingState, pollIntervalMs);
           } catch (error) {

@@ -33,6 +33,7 @@
     <script>
       (() => {
         const currentState = {
+          accessState: <%- JSON.stringify(accessState || "active_authorized") %>,
           authorized: true,
           deviceCode: <%- JSON.stringify(deviceCode) %>,
           layoutId: <%- JSON.stringify(layoutId || null) %>,
@@ -42,6 +43,9 @@
         const pollIntervalMs = <%- JSON.stringify(devicePollIntervalMs) %>;
         let fragmentFailureCount = 0;
         let isUpdatingLayout = false;
+        let isReauthInProgress = false;
+        let reauthRetryBlocked = false;
+        let softFailureCount = 0;
         let latestExpectedLayoutId = currentState.layoutId;
 
         function normalizeLayoutId(value) {
@@ -54,6 +58,82 @@
 
         function getLayoutRoot() {
           return document.getElementById("device-layout-root");
+        }
+
+        function getScopedDeviceSecretKey(currentDeviceCode) {
+          return `mydashmaster-device-secret:${currentDeviceCode}`;
+        }
+
+        function getLegacyDeviceSecretKey() {
+          return "mydashmaster-device-secret";
+        }
+
+        function persistScopedDeviceSecret(currentDeviceCode, deviceSecret) {
+          window.localStorage.setItem(
+            getScopedDeviceSecretKey(currentDeviceCode),
+            deviceSecret
+          );
+        }
+
+        function readDeviceSecretCandidate(currentDeviceCode) {
+          const scopedDeviceSecret = window.localStorage.getItem(
+            getScopedDeviceSecretKey(currentDeviceCode)
+          );
+
+          if (scopedDeviceSecret) {
+            return {
+              secret: scopedDeviceSecret,
+              source: "scoped"
+            };
+          }
+
+          const legacyDeviceSecret = window.localStorage.getItem(
+            getLegacyDeviceSecretKey()
+          );
+
+          if (legacyDeviceSecret) {
+            return {
+              secret: legacyDeviceSecret,
+              source: "legacy"
+            };
+          }
+
+          return null;
+        }
+
+        function isHardAccessState(accessState) {
+          return (
+            accessState === "revoked" ||
+            accessState === "auth_mismatch" ||
+            accessState === "blocked_by_other_client"
+          );
+        }
+
+        async function requestReauth(deviceSecret) {
+          const response = await window.fetch(
+            `/api/device/${encodeURIComponent(currentState.deviceCode)}/auth`,
+            {
+              body: JSON.stringify({ deviceSecret }),
+              credentials: "same-origin",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              method: "POST"
+            }
+          );
+          let payload = null;
+
+          try {
+            payload = await response.json();
+          } catch (error) {
+            payload = null;
+          }
+
+          return {
+            ok: response.ok,
+            payload,
+            status: response.status
+          };
         }
 
         async function fetchLayoutFragment() {
@@ -172,6 +252,50 @@
           }
         }
 
+        async function attemptSilentReauth() {
+          if (reauthRetryBlocked || isReauthInProgress) {
+            return "soft_failure";
+          }
+
+          const secretCandidate = readDeviceSecretCandidate(currentState.deviceCode);
+
+          if (!secretCandidate?.secret) {
+            return "soft_failure";
+          }
+
+          isReauthInProgress = true;
+
+          try {
+            const authResult = await requestReauth(secretCandidate.secret);
+
+            if (authResult.ok) {
+              if (secretCandidate.source === "legacy") {
+                persistScopedDeviceSecret(currentState.deviceCode, secretCandidate.secret);
+              }
+              reauthRetryBlocked = false;
+              softFailureCount = 0;
+              return "reauth_success";
+            }
+
+            if (
+              authResult.status === 401 ||
+              authResult.payload?.status === "unauthorized" ||
+              authResult.payload?.accessState === "auth_mismatch"
+            ) {
+              reauthRetryBlocked = true;
+              return "hard_failure";
+            }
+
+            return "soft_failure";
+          } finally {
+            isReauthInProgress = false;
+          }
+        }
+
+        function resetSoftFailureState() {
+          softFailureCount = 0;
+        }
+
         async function pollDeviceStatus() {
           try {
             const response = await window.fetch(
@@ -183,12 +307,7 @@
             );
             const payload = await response.json();
 
-            if (
-              !payload ||
-              payload.status !== currentState.status ||
-              payload.clientState !== "active" ||
-              payload.authorized !== true
-            ) {
+            if (!payload || payload.status !== currentState.status) {
               window.location.reload();
               return;
             }
@@ -198,9 +317,58 @@
               return;
             }
 
-            if (payload.layoutId !== currentState.layoutId) {
-              await updateLayoutFragment(payload.layoutId);
+            currentState.accessState = payload.accessState;
+
+            if (
+              payload.accessState === "active_authorized" &&
+              payload.authorized === true
+            ) {
+              resetSoftFailureState();
+
+              if (payload.layoutId !== currentState.layoutId) {
+                await updateLayoutFragment(payload.layoutId);
+              }
+
+              return;
             }
+
+            if (isHardAccessState(payload.accessState)) {
+              window.location.reload();
+              return;
+            }
+
+            if (payload.accessState === "reauth_required") {
+              softFailureCount += 1;
+              const reauthOutcome = await attemptSilentReauth();
+
+              if (reauthOutcome === "hard_failure") {
+                window.location.reload();
+                return;
+              }
+
+              if (reauthOutcome === "reauth_success") {
+                return;
+              }
+
+              if (softFailureCount >= 2) {
+                window.location.reload();
+                return;
+              }
+
+              return;
+            }
+
+            if (payload.accessState === "pending_activation") {
+              softFailureCount += 1;
+
+              if (softFailureCount >= 2) {
+                window.location.reload();
+              }
+
+              return;
+            }
+
+            window.location.reload();
           } catch (error) {
             console.error(error);
           }

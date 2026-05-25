@@ -107,6 +107,10 @@ function setDeviceSessionCookie(req, res, deviceCode, secretHash) {
   });
 }
 
+function renewDeviceSessionCookie(req, res, deviceCode, secretHash) {
+  setDeviceSessionCookie(req, res, deviceCode, secretHash);
+}
+
 function clearDeviceSessionCookie(req, res, deviceCode) {
   res.clearCookie(DEVICE_SESSION_COOKIE, {
     httpOnly: true,
@@ -123,5 +127,6 @@ module.exports = {
   hashDeviceSecret,
   hasValidDeviceSession,
   readDeviceClientId,
+  renewDeviceSessionCookie,
   setDeviceSessionCookie
 };
