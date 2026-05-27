@@ -2086,6 +2086,78 @@ test("client activity stores lastKnownIp per client on status polling", async ()
   }
 });
 
+
+test("device auth stores forwarded client IP from X-Real-IP when req.ip is the proxy hop", async () => {
+  const deviceCode = "realip01";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "pending"
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/device/${deviceCode}/auth`, {
+        body: JSON.stringify({ deviceSecret: "secret-real-ip" }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Real-IP": "203.0.113.91"
+        },
+        method: "POST"
+      });
+
+      assert.equal(response.status, 200);
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+
+    assert.equal(deviceAuth.lastKnownIp, "203.0.113.91");
+    assert.equal(deviceAuth.clients[0].lastKnownIp, "203.0.113.91");
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
+test("status polling stores forwarded client IP from Forwarded header when req.ip is the proxy hop", async () => {
+  const deviceCode = "fwdip001";
+  const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
+  const deviceAuthFilePath = path.join(deviceAuthDir, `${deviceCode}.json`);
+
+  await removeIfExists(deviceFilePath);
+  await removeIfExists(deviceAuthFilePath);
+
+  try {
+    await writeDevice(deviceCode, {
+      deviceCode,
+      status: "pending"
+    });
+
+    await withServer(async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/device/${deviceCode}/status`, {
+        headers: {
+          Forwarded: "for=203.0.113.92;proto=https;by=172.19.0.1"
+        }
+      });
+
+      assert.equal(response.status, 200);
+    });
+
+    const deviceAuth = await readDeviceAuth(deviceCode);
+
+    assert.equal(deviceAuth.clients.length, 1);
+    assert.equal(deviceAuth.clients[0].lastKnownIp, "203.0.113.92");
+  } finally {
+    await removeIfExists(deviceFilePath);
+    await removeIfExists(deviceAuthFilePath);
+  }
+});
+
 test("subsequent auth does not replace the active client without explicit selection", async () => {
   const deviceCode = "heartbt3";
   const deviceFilePath = path.join(devicesDir, `${deviceCode}.json`);
