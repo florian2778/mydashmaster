@@ -62,6 +62,7 @@ function buildStatusPayload(req, deviceCode, device, deviceAuth, clientId) {
     deviceAuth,
     hasValidSession: validSession
   });
+  // accessState remains the canonical lifecycle model; clientState stays as a compatibility/UI grouping.
   const derivedClientState = deriveClientState({
     clientId,
     device,

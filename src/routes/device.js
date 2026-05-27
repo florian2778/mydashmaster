@@ -2,7 +2,9 @@ const express = require("express");
 
 const {
   deriveClientState,
-  deriveDeviceAccessState
+  deriveDeviceAccessState,
+  getAccessStateMeta,
+  isHardAccessState
 } = require("../device/client-state");
 const {
   clearDeviceSessionCookie,
@@ -20,14 +22,21 @@ const {
 const router = express.Router();
 
 function renderAccessState(res, deviceCode, accessState, options = {}) {
-  let state = null;
+  const accessStateMeta = getAccessStateMeta(accessState);
+  let state = {
+    message: accessStateMeta.uiLabel,
+    note: accessStateMeta.adminHint,
+    pageTitle: accessStateMeta.uiLabel,
+    shouldBootstrap: false,
+    shouldPoll: true
+  };
 
   if (accessState === "blocked_by_other_client") {
     state = {
       message: "This browser is not the active one",
       note:
         "Another browser is currently active for this device. Ask an admin to switch activation if needed.",
-      pageTitle: "Access not available",
+      pageTitle: accessStateMeta.uiLabel,
       shouldBootstrap: false,
       shouldPoll: true
     };
@@ -36,7 +45,7 @@ function renderAccessState(res, deviceCode, accessState, options = {}) {
       message: "Authentication mismatch",
       note:
         "This browser no longer matches the current device secret. Reconnect it from the active browser context or ask an admin for help.",
-      pageTitle: "Authentication mismatch",
+      pageTitle: accessStateMeta.uiLabel,
       shouldBootstrap: false,
       shouldPoll: true
     };
@@ -45,7 +54,7 @@ function renderAccessState(res, deviceCode, accessState, options = {}) {
       message: "Access revoked",
       note:
         "This device no longer has access. Please contact an administrator.",
-      pageTitle: "Access revoked",
+      pageTitle: accessStateMeta.uiLabel,
       shouldBootstrap: false,
       shouldPoll: true
     };
@@ -54,7 +63,7 @@ function renderAccessState(res, deviceCode, accessState, options = {}) {
       message: "Reconnecting session",
       note:
         "This browser is known but needs to refresh its device session. Leave this page open.",
-      pageTitle: "Reconnecting session",
+      pageTitle: accessStateMeta.uiLabel,
       shouldBootstrap: true,
       shouldPoll: true
     };
@@ -146,11 +155,7 @@ router.get("/:deviceCode", async (req, res, next) => {
     });
 
     if (derivedAccessState.accessState !== "active_authorized") {
-      if (
-        derivedAccessState.accessState === "blocked_by_other_client" ||
-        derivedAccessState.accessState === "auth_mismatch" ||
-        derivedAccessState.accessState === "revoked"
-      ) {
+      if (isHardAccessState(derivedAccessState.accessState)) {
         clearDeviceSessionCookie(req, res, deviceCode);
       }
 

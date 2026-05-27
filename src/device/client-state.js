@@ -1,6 +1,79 @@
 const DEFAULT_DEVICE_POLL_INTERVAL_MS = 10000;
 const ACTIVATABLE_ACTIVITY_MULTIPLIER = 5;
 
+const ACCESS_STATE_META = Object.freeze({
+  pending_activation: Object.freeze({
+    uiLabel: "Waiting for activation",
+    severity: "warning",
+    recoverability: "admin_action",
+    adminHint: "Admin approval or activation is still required before this browser may show the layout.",
+    isHardState: false
+  }),
+  active_authorized: Object.freeze({
+    uiLabel: "Active",
+    severity: "ok",
+    recoverability: "none",
+    adminHint: "No admin action is required while the active client remains authorized.",
+    isHardState: false
+  }),
+  reauth_required: Object.freeze({
+    uiLabel: "Reauthentication needed",
+    severity: "warning",
+    recoverability: "automatic",
+    adminHint: "The browser should refresh its short-lived device session automatically.",
+    isHardState: false
+  }),
+  auth_mismatch: Object.freeze({
+    uiLabel: "Authentication mismatch",
+    severity: "error",
+    recoverability: "manual",
+    adminHint: "The browser no longer matches the stored device secret and needs conscious admin recovery.",
+    isHardState: true
+  }),
+  blocked_by_other_client: Object.freeze({
+    uiLabel: "Blocked by other client",
+    severity: "error",
+    recoverability: "admin_action",
+    adminHint: "Another browser is currently active for this device and must be switched explicitly by an admin.",
+    isHardState: true
+  }),
+  revoked: Object.freeze({
+    uiLabel: "Access revoked",
+    severity: "error",
+    recoverability: "none",
+    adminHint: "Device access is revoked. No automatic recovery should run.",
+    isHardState: true
+  }),
+  unknown: Object.freeze({
+    uiLabel: "Unknown state",
+    severity: "neutral",
+    recoverability: "manual",
+    adminHint: "The access state is unknown and should be treated conservatively.",
+    isHardState: true
+  })
+});
+
+function getAccessStateMeta(accessState) {
+  if (typeof accessState !== "string") {
+    return ACCESS_STATE_META.unknown;
+  }
+
+  return ACCESS_STATE_META[accessState] || ACCESS_STATE_META.unknown;
+}
+
+function getAccessStateLabel(accessState) {
+  return getAccessStateMeta(accessState).uiLabel;
+}
+
+function isHardAccessState(accessState) {
+  return getAccessStateMeta(accessState).isHardState === true;
+}
+
+function isRecoverableAccessState(accessState) {
+  const { recoverability } = getAccessStateMeta(accessState);
+  return recoverability === "automatic" || recoverability === "manual" || recoverability === "admin_action";
+}
+
 function getPairedClient(deviceAuth) {
   if (!Array.isArray(deviceAuth?.clients)) {
     return null;
@@ -115,6 +188,7 @@ function deriveDeviceAccessState({
 
   return {
     accessState,
+    accessStateMeta: getAccessStateMeta(accessState),
     activeClient,
     authorized,
     canAttemptBootstrapAuth,
@@ -135,6 +209,7 @@ function deriveDeviceAccessState({
 }
 
 function deriveClientState({ device, deviceAuth, clientId, hasValidSession = false }) {
+  // accessState is the canonical lifecycle model; clientState remains a compact admin/UI grouping.
   const derivedAccessState = deriveDeviceAccessState({
     clientId,
     device,
@@ -164,10 +239,15 @@ function deriveClientState({ device, deviceAuth, clientId, hasValidSession = fal
 }
 
 module.exports = {
+  ACCESS_STATE_META,
   deriveDeviceAccessState,
   deriveClientState,
+  getAccessStateLabel,
+  getAccessStateMeta,
   getClient,
   getPairedClient,
   hasAuthenticationMismatch,
-  hasCurrentAuthentication
+  hasCurrentAuthentication,
+  isHardAccessState,
+  isRecoverableAccessState
 };

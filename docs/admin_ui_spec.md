@@ -370,6 +370,12 @@ Das aktuelle fachliche Modell trennt:
   - official active client
   - additional client activity
 
+Wichtige fachliche Lesart:
+- `accessState` ist das primäre Device-Lifecycle-Modell
+- Admin-Gruppen wie `pending`, `active`, `blocked` sind nur abgeleitete UI-Gruppen
+- `online` / `offline` beschreibt nur Liveness bzw. Heartbeat, nicht Access
+- historisches `isAuthenticated` ist fachlich als `hasCurrentAuthentication` zu lesen
+
 ### Device Overview
 
 Die Devices Übersicht zeigt nur Device-Level-Informationen.

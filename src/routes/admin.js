@@ -302,6 +302,7 @@ function buildDeviceOverviewPayload(devices) {
 }
 
 function buildClientDisplay(device, deviceAuth, client) {
+  // accessState remains the canonical lifecycle model; clientState is only a compact admin/UI grouping.
   const derivedState = deriveClientState({
     clientId: client.clientId,
     device,
