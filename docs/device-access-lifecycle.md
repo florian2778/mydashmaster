@@ -171,6 +171,54 @@ Wichtige Regel:
 
 ---
 
+## Recovery Matrix
+
+### reauth_required
+- Bedeutung:
+  - der Browser gehört weiterhin zum gültigen aktiven Kontext
+  - nur die kurzlebige Session fehlt oder ist abgelaufen
+- Erwartung:
+  - automatische Recovery über das scoped browser secret
+- Admin-Aktion:
+  - normalerweise keine
+- Wichtig:
+  - kein Aktivierungsproblem
+
+### auth_mismatch
+- Bedeutung:
+  - Browser-Secret passt nicht mehr zum aktuellen Secret-Zyklus
+- Erwartung:
+  - keine automatische Recovery
+- Admin-Aktion:
+  - bewusstes Reset activation oder bewusstes Re-Pairing/Reconnect
+- Wichtig:
+  - kein stiller Auto-Reset
+
+### blocked_by_other_client
+- Bedeutung:
+  - ein anderer Browser ist aktuell offizieller aktiver Client
+- Erwartung:
+  - kein Fehler im eigentlichen Sinn
+- Admin-Aktion:
+  - nur bewusst umschalten, falls gewollt
+
+### pending_activation
+- Bedeutung:
+  - Device nicht freigegeben oder noch kein aktiver Client gewählt
+- Erwartung:
+  - echter Aktivierungs- und Wartefall
+
+### revoked
+- Bedeutung:
+  - harter Entzug
+- Erwartung:
+  - keine automatische Recovery
+
+Wichtige Einordnung:
+- `accessState` ist das Primärmodell
+- `online` / `offline` beschreibt nur Heartbeat/Liveness
+- `clientState` bleibt eine Admin-/UI-Ableitung
+
 ## Reset Activation
 
 Reset activation bedeutet aktuell:

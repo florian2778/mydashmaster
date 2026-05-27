@@ -43,6 +43,13 @@
     <div class="admin-layout-detail-section-head">
       <h2>Summary</h2>
     </div>
+    <% if (recoveryHints.length > 0) { %>
+      <div class="admin-device-recovery-hints">
+        <% recoveryHints.forEach((hint) => { %>
+          <p class="admin-device-hero-note"><%= hint %></p>
+        <% }) %>
+      </div>
+    <% } %>
     <div class="admin-device-summary-grid">
       <article class="admin-device-summary-card">
         <p class="admin-device-summary-label">Availability</p>
@@ -141,6 +148,9 @@
                       <span><strong>Browser</strong> <span title="<%= client.userAgent || "-" %>"><%= client.displayUserAgentShort %></span></span>
                     </div>
                     <p class="admin-device-client-note"><%= client.displayHint %></p>
+                    <% if (client.accessStateLabel && client.accessStateLabel !== client.clientStateLabel) { %>
+                      <p class="admin-device-client-note">Lifecycle state: <%= client.accessStateLabel %></p>
+                    <% } %>
                     <% if (canActivateClients && client.canActivate) { %>
                       <form action="/admin/devices/<%= device.deviceCode %>/activate-client" method="post">
                         <input type="hidden" name="clientId" value="<%= client.clientId %>">

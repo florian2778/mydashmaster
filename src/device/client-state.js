@@ -228,6 +228,7 @@ function deriveClientState({ device, deviceAuth, clientId, hasValidSession = fal
   }
 
   return {
+    accessState: derivedAccessState.accessState,
     client: derivedAccessState.client,
     hasPairedClient: derivedAccessState.hasActiveClient,
     isAuthenticated: derivedAccessState.hasCurrentAuthentication,

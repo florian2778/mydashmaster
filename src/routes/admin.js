@@ -1,6 +1,6 @@
 const express = require("express");
 
-const { deriveClientState, getPairedClient } = require("../device/client-state");
+const { deriveClientState, getAccessStateMeta, getPairedClient } = require("../device/client-state");
 const {
   clearAdminSessionCookie,
   hasAdminAuthConfig,
@@ -32,6 +32,7 @@ const {
   writeLayout
 } = require("../storage/json-store");
 const { validateLayout } = require("../storage/validators");
+const { logLifecycleEvent } = require("../utils/lifecycle-log");
 
 const router = express.Router();
 const DEFAULT_DEVICE_POLL_INTERVAL_MS = 10000;
@@ -301,6 +302,22 @@ function buildDeviceOverviewPayload(devices) {
   };
 }
 
+function getAdminRecoveryHint(accessState) {
+  const accessStateMeta = getAccessStateMeta(accessState);
+
+  const recoveryHints = {
+    pending_activation: "This device is still waiting for activation or an active client assignment.",
+    active_authorized: "This client is currently authorized and no recovery action is required.",
+    reauth_required: "This browser should recover automatically if its scoped secret is still valid.",
+    auth_mismatch: "This browser no longer matches the current device secret cycle. Manual recovery may be required.",
+    blocked_by_other_client: "Another browser is currently the official active client for this device.",
+    revoked: "This device access has been revoked and requires explicit reactivation.",
+    unknown: accessStateMeta.adminHint
+  };
+
+  return recoveryHints[accessState] || accessStateMeta.adminHint;
+}
+
 function buildClientDisplay(device, deviceAuth, client) {
   // accessState remains the canonical lifecycle model; clientState is only a compact admin/UI grouping.
   const derivedState = deriveClientState({
@@ -308,9 +325,13 @@ function buildClientDisplay(device, deviceAuth, client) {
     device,
     deviceAuth
   });
+  const accessStateMeta = getAccessStateMeta(derivedState.accessState);
 
   return {
     ...client,
+    accessState: derivedState.accessState,
+    accessStateAdminHint: getAdminRecoveryHint(derivedState.accessState),
+    accessStateLabel: accessStateMeta.uiLabel,
     canActivate: derivedState.isActivatable,
     clientState: derivedState.state,
     clientStateLabel:
@@ -413,22 +434,45 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
   groupedClients.otherPending = groupedClients.otherPending.map((client) => ({
     ...client,
     displayHint:
-      !client.isAuthenticated
-        ? "Client has not completed authentication."
-        : !client.isRecentlyActive
-          ? "Client activity is no longer recent enough."
-          : "Client is pending and waiting for activation."
+      client.accessState === "auth_mismatch"
+        ? getAdminRecoveryHint("auth_mismatch")
+        : client.accessState === "revoked"
+          ? getAdminRecoveryHint("revoked")
+          : !client.isAuthenticated
+            ? "Client has not completed authentication yet and is still waiting for activation."
+            : !client.isRecentlyActive
+              ? "Client authentication is present, but the activity window is no longer recent enough for activation."
+              : getAdminRecoveryHint("pending_activation")
   }));
   groupedClients.blocked = groupedClients.blocked.map((client) => ({
     ...client,
-    displayHint: "Another client is currently active."
+    displayHint: getAdminRecoveryHint("blocked_by_other_client")
   }));
   groupedClients.readyToActivate = groupedClients.readyToActivate.map((client) => ({
     ...client,
-    displayHint: "Ready to become the official client."
+    displayHint: "Ready to become the official client. No recovery action is required before activation."
   }));
   const publicDeviceUrl = `/d/${device.deviceCode}`;
   const publicDeviceUrlAbsolute = options.publicDeviceUrlAbsolute || publicDeviceUrl;
+  const recoveryHints = [];
+
+  if (device.status === "revoked") {
+    recoveryHints.push(getAdminRecoveryHint("revoked"));
+  } else if (officialClientDisplay?.accessState === "reauth_required") {
+    recoveryHints.push(getAdminRecoveryHint("reauth_required"));
+  } else if (!activeClient) {
+    recoveryHints.push(getAdminRecoveryHint("pending_activation"));
+  }
+
+  if (groupedClients.blocked.length > 0) {
+    recoveryHints.push(getAdminRecoveryHint("blocked_by_other_client"));
+  }
+
+  if (groupedClients.otherPending.some((client) => client.accessState === "auth_mismatch")) {
+    recoveryHints.push(getAdminRecoveryHint("auth_mismatch"));
+  }
+
+  const uniqueRecoveryHints = Array.from(new Set(recoveryHints));
 
   return {
     actionErrorMessage: options.actionErrorMessage || null,
@@ -456,6 +500,7 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
     groupedClients,
     hasActivatableClients,
     otherClientsCount: additionalClients.length,
+    recoveryHints: uniqueRecoveryHints,
     technicalDetails: {
       deviceCode: device.deviceCode,
       status: device.status,
@@ -1032,6 +1077,10 @@ router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
     const { deviceCode } = req.params;
     const clientId =
       typeof req.body?.clientId === "string" ? req.body.clientId.trim() : "";
+    const requestIp = req.ip;
+    const requestUserAgent = typeof req.headers["user-agent"] === "string"
+      ? req.headers["user-agent"]
+      : undefined;
 
     if (!clientId) {
       return renderDeviceDetailPage(req, res, deviceCode, {
@@ -1053,6 +1102,15 @@ router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
       throw error;
     }
 
+    logLifecycleEvent("admin_device_client_activated", {
+      clientId,
+      details: { action: "activate_client" },
+      deviceCode,
+      ip: requestIp,
+      level: "info",
+      userAgent: requestUserAgent
+    });
+
     return res.redirect(`/admin/devices/${deviceCode}`);
   } catch (error) {
     next(error);
@@ -1062,9 +1120,20 @@ router.post("/devices/:deviceCode/activate-client", async (req, res, next) => {
 router.post("/devices/:deviceCode/revoke", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
+    const requestIp = req.ip;
+    const requestUserAgent = typeof req.headers["user-agent"] === "string"
+      ? req.headers["user-agent"]
+      : undefined;
 
     await revokeDeviceAuth(deviceCode);
     await updateDevice(deviceCode, { status: "revoked" });
+    logLifecycleEvent("admin_device_revoked", {
+      details: { action: "revoke" },
+      deviceCode,
+      ip: requestIp,
+      level: "info",
+      userAgent: requestUserAgent
+    });
 
     redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {
@@ -1075,8 +1144,19 @@ router.post("/devices/:deviceCode/revoke", async (req, res, next) => {
 router.post("/devices/:deviceCode/reset-pairing", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
+    const requestIp = req.ip;
+    const requestUserAgent = typeof req.headers["user-agent"] === "string"
+      ? req.headers["user-agent"]
+      : undefined;
 
     await resetDevicePairing(deviceCode);
+    logLifecycleEvent("admin_device_pairing_reset", {
+      details: { action: "reset_pairing" },
+      deviceCode,
+      ip: requestIp,
+      level: "info",
+      userAgent: requestUserAgent
+    });
 
     redirectAfterDeviceAction(req, res, deviceCode);
   } catch (error) {

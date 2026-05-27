@@ -21,6 +21,7 @@ const {
   readDevice,
   readDeviceAuth
 } = require("../storage/json-store");
+const { logLifecycleEvent } = require("../utils/lifecycle-log");
 
 const router = express.Router();
 
@@ -103,18 +104,70 @@ router.get("/:deviceCode/status", async (req, res, next) => {
       return res.status(404).json(payload);
     }
 
+    const requestIp = getRequestIp(req);
+    const requestUserAgent = getRequestUserAgent(req);
+
+    if (payload.accessState === "reauth_required") {
+      logLifecycleEvent("device_access_reauth_required", {
+        accessState: payload.accessState,
+        clientId,
+        cooldownMs: 60000,
+        dedupeKey: `device_access_reauth_required:${deviceCode}:${clientId}`,
+        details: { status: payload.status },
+        deviceCode,
+        ip: requestIp,
+        level: "info",
+        userAgent: requestUserAgent
+      });
+    } else if (payload.accessState === "auth_mismatch") {
+      logLifecycleEvent("device_access_auth_mismatch", {
+        accessState: payload.accessState,
+        clientId,
+        cooldownMs: 60000,
+        dedupeKey: `device_access_auth_mismatch:${deviceCode}:${clientId}`,
+        details: { status: payload.status },
+        deviceCode,
+        ip: requestIp,
+        level: "warn",
+        userAgent: requestUserAgent
+      });
+    } else if (payload.accessState === "blocked_by_other_client") {
+      logLifecycleEvent("device_access_blocked_by_other_client", {
+        accessState: payload.accessState,
+        clientId,
+        cooldownMs: 60000,
+        dedupeKey: `device_access_blocked_by_other_client:${deviceCode}:${clientId}`,
+        details: { status: payload.status },
+        deviceCode,
+        ip: requestIp,
+        level: "warn",
+        userAgent: requestUserAgent
+      });
+    }
+
     await recordDeviceClientActivity(
       deviceCode,
       clientId,
       {
         isOfficialHeartbeat: payload.authorized === true
       },
-      getRequestUserAgent(req),
-      getRequestIp(req)
+      requestUserAgent,
+      requestIp
     );
 
     if (payload.authorized === true && deviceAuth?.secretHash) {
       renewDeviceSessionCookie(req, res, deviceCode, deviceAuth.secretHash);
+      logLifecycleEvent("device_session_renewed", {
+        accessState: payload.accessState,
+        clientId,
+        cooldownMs: 300000,
+        dedupeKey: `device_session_renewed:${deviceCode}:${clientId}`,
+        details: { reason: "authorized_status_poll" },
+        deviceCode,
+        ip: requestIp,
+        level: "info",
+        userAgent: requestUserAgent
+      });
     }
 
     return res.json(payload);
@@ -171,9 +224,18 @@ router.post("/:deviceCode/auth", async (req, res, next) => {
 
     const secretHash = hashDeviceSecret(deviceSecret);
     const requestIp = getRequestIp(req);
+    const requestUserAgent = getRequestUserAgent(req);
 
     if (device.status === "revoked") {
       clearDeviceSessionCookie(req, res, deviceCode);
+      logLifecycleEvent("device_auth_failed", {
+        clientId,
+        details: { reason: "revoked", status: device.status },
+        deviceCode,
+        ip: requestIp,
+        level: "warn",
+        userAgent: requestUserAgent
+      });
       return res.json({ status: "revoked" });
     }
 
@@ -181,6 +243,15 @@ router.post("/:deviceCode/auth", async (req, res, next) => {
 
     if (deviceAuth?.secretHash && deviceAuth.secretHash !== secretHash) {
       clearDeviceSessionCookie(req, res, deviceCode);
+      logLifecycleEvent("device_auth_failed", {
+        accessState: "auth_mismatch",
+        clientId,
+        details: { reason: "secret_mismatch", status: "unauthorized" },
+        deviceCode,
+        ip: requestIp,
+        level: "warn",
+        userAgent: requestUserAgent
+      });
       return res.status(401).json({ status: "unauthorized" });
     }
 
@@ -199,6 +270,15 @@ router.post("/:deviceCode/auth", async (req, res, next) => {
       deviceCode,
       deviceAuth?.secretHash || secretHash
     );
+
+    logLifecycleEvent("device_auth_success", {
+      clientId,
+      details: { status: device.status },
+      deviceCode,
+      ip: requestIp,
+      level: "info",
+      userAgent: requestUserAgent
+    });
 
     return res.json({ status: device.status });
   } catch (error) {

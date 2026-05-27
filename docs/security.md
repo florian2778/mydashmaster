@@ -136,6 +136,58 @@ If the browser still has a mismatching old secret:
 
 ---
 
+## Recovery Matrix
+
+### reauth_required
+- Bedeutung:
+  - browser context still belongs to the valid active device/client context
+  - only the short-lived session is missing or expired
+- Erwartung:
+  - automatic recovery via scoped browser secret
+- Admin-Aktion:
+  - normally none
+- Wichtig:
+  - this is not an activation problem
+
+### auth_mismatch
+- Bedeutung:
+  - the browser secret no longer matches the current server-side secret cycle
+- Erwartung:
+  - no automatic recovery
+- Admin-Aktion:
+  - conscious reset activation or conscious re-pairing / reconnect path
+- Wichtig:
+  - no silent auto-reset or secret overwrite
+
+### blocked_by_other_client
+- Bedeutung:
+  - another browser is currently the official active client
+- Erwartung:
+  - not a failure by itself
+- Admin-Aktion:
+  - only switch deliberately if desired
+
+### pending_activation
+- Bedeutung:
+  - device is not approved yet or no active client is selected
+- Erwartung:
+  - real activation / waiting state
+- Admin-Aktion:
+  - approve and/or activate a client deliberately
+
+### revoked
+- Bedeutung:
+  - explicit hard access withdrawal
+- Erwartung:
+  - no automatic recovery
+- Admin-Aktion:
+  - explicit re-approval / reactivation workflow only
+
+Wichtige Einordnung:
+- `accessState` ist das primäre Lifecycle-Modell
+- `online` / `offline` beschreibt nur Heartbeat- bzw. Liveness-Sicht
+- `clientState` ist nur eine kompakte Admin-/UI-Ableitung
+
 ## Reset Activation
 
 - admin can reset activation without revoking the device

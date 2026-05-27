@@ -18,6 +18,7 @@ const {
   readDevice,
   readDeviceAuth
 } = require("../storage/json-store");
+const { logLifecycleEvent } = require("../utils/lifecycle-log");
 
 const router = express.Router();
 
@@ -155,6 +156,49 @@ router.get("/:deviceCode", async (req, res, next) => {
     });
 
     if (derivedAccessState.accessState !== "active_authorized") {
+      const requestIp = getRequestIp(req);
+      const requestUserAgent = typeof req.headers["user-agent"] === "string"
+        ? req.headers["user-agent"]
+        : undefined;
+
+      if (derivedAccessState.accessState === "reauth_required") {
+        logLifecycleEvent("device_access_reauth_required", {
+          accessState: derivedAccessState.accessState,
+          clientId,
+          cooldownMs: 60000,
+          dedupeKey: `device_access_reauth_required:${deviceCode}:${clientId}`,
+          details: { source: "device_page" },
+          deviceCode,
+          ip: requestIp,
+          level: "info",
+          userAgent: requestUserAgent
+        });
+      } else if (derivedAccessState.accessState === "auth_mismatch") {
+        logLifecycleEvent("device_access_auth_mismatch", {
+          accessState: derivedAccessState.accessState,
+          clientId,
+          cooldownMs: 60000,
+          dedupeKey: `device_access_auth_mismatch:${deviceCode}:${clientId}`,
+          details: { source: "device_page" },
+          deviceCode,
+          ip: requestIp,
+          level: "warn",
+          userAgent: requestUserAgent
+        });
+      } else if (derivedAccessState.accessState === "blocked_by_other_client") {
+        logLifecycleEvent("device_access_blocked_by_other_client", {
+          accessState: derivedAccessState.accessState,
+          clientId,
+          cooldownMs: 60000,
+          dedupeKey: `device_access_blocked_by_other_client:${deviceCode}:${clientId}`,
+          details: { source: "device_page" },
+          deviceCode,
+          ip: requestIp,
+          level: "warn",
+          userAgent: requestUserAgent
+        });
+      }
+
       if (isHardAccessState(derivedAccessState.accessState)) {
         clearDeviceSessionCookie(req, res, deviceCode);
       }

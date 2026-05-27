@@ -617,6 +617,32 @@ Detailansicht eines einzelnen Devices
 - keine neue Auth-, Heartbeat- oder Lifecycle-Logik wird aus der UI eingeführt
 - alle Anzeigezustände werden aus bestehenden Daten abgeleitet
 
+### Recovery-Hinweise
+- `accessState` ist das primäre Device-Lifecycle-Modell
+- `pending` / `active` / `blocked` bleiben nur abgeleitete UI-Gruppen für Clientkarten
+- `online` / `offline` beschreibt nur Liveness bzw. Heartbeat-Frische
+- historisches `isAuthenticated` ist fachlich als `hasCurrentAuthentication` zu lesen
+
+Admin-Hinweise sollen knapp erklären:
+- was der Zustand bedeutet
+- ob automatische Recovery erwartet wird
+- wann bewusst eingegriffen werden sollte
+
+Recovery-Matrix für das Device Detail:
+- `reauth_required`
+  - automatische Recovery erwartet
+  - normalerweise keine Admin-Aktion
+- `auth_mismatch`
+  - keine automatische Recovery
+  - bewusste manuelle Recovery wie Reset activation oder erneute Aktivierung erforderlich
+- `blocked_by_other_client`
+  - kein eigentlicher Fehler
+  - nur bewusst umschalten, falls gewünscht
+- `pending_activation`
+  - echter Aktivierungs-/Wartefall
+- `revoked`
+  - harter Entzug ohne automatische Recovery
+
 ---
 
 ## Offene Punkte

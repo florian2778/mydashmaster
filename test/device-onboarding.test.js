@@ -850,7 +850,8 @@ test("admin device detail page shows summary, official active client, and additi
         assert.match(body, new RegExp(`full clientId<\\/strong> <code>client-bravo-5678<\\/code>`));
         assert.doesNotMatch(body, /name="clientId" value="client-bravo-5678"/);
         assert.doesNotMatch(body, /name="clientId" value="client-alpha-1234"/);
-        assert.match(body, /Another client is currently active\./);
+        assert.match(body, /Another browser is currently the official active client for this device\./);
+        assert.match(body, /Lifecycle state: Blocked by other client/);
         assert.match(body, /window\.setInterval\(\(\) => \{/);
         assert.match(body, /window\.location\.reload\(\)/);
         assert.match(body, /detailPollIntervalMs/);
@@ -860,6 +861,86 @@ test("admin device detail page shows summary, official active client, and additi
     await removeIfExists(deviceFilePath);
     await removeIfExists(deviceAuthFilePath);
     await removeIfExists(layoutFilePath);
+  }
+});
+
+test("admin device detail page renders recovery hints for auth mismatch and revoked states", async () => {
+  const mismatchCode = "detail03";
+  const mismatchDeviceFilePath = path.join(devicesDir, `${mismatchCode}.json`);
+  const mismatchDeviceAuthFilePath = path.join(deviceAuthDir, `${mismatchCode}.json`);
+  const revokedCode = "detail04";
+  const revokedDeviceFilePath = path.join(devicesDir, `${revokedCode}.json`);
+  const revokedDeviceAuthFilePath = path.join(deviceAuthDir, `${revokedCode}.json`);
+
+  await removeIfExists(mismatchDeviceFilePath);
+  await removeIfExists(mismatchDeviceAuthFilePath);
+  await removeIfExists(revokedDeviceFilePath);
+  await removeIfExists(revokedDeviceAuthFilePath);
+
+  try {
+    await writeDevice(mismatchCode, {
+      deviceCode: mismatchCode,
+      status: "approved"
+    });
+    await updateDeviceAuth(mismatchCode, {
+      clients: [
+        {
+          clientId: "client-active",
+          isPairedClient: true,
+          lastAuthenticatedAt: "2026-04-13T09:00:00.000Z",
+          lastSeenAt: new Date().toISOString(),
+          sessionSecretHash: hashDeviceSecret("secret-server"),
+          userAgent: "ActiveBrowser/1.0"
+        },
+        {
+          clientId: "client-mismatch",
+          isPairedClient: false,
+          lastAuthenticatedAt: "2026-04-13T10:00:00.000Z",
+          lastSeenAt: new Date().toISOString(),
+          sessionSecretHash: hashDeviceSecret("secret-client"),
+          userAgent: "MismatchBrowser/1.0"
+        }
+      ],
+      deviceCode: mismatchCode,
+      secretHash: hashDeviceSecret("secret-server"),
+      updatedAt: new Date().toISOString()
+    });
+
+    await writeDevice(revokedCode, {
+      deviceCode: revokedCode,
+      status: "revoked"
+    });
+
+    await withAdminEnv(async () => {
+      await withServer(async (baseUrl) => {
+        const adminCookie = await loginAsAdmin(baseUrl);
+        const mismatchResponse = await fetch(`${baseUrl}/admin/devices/${mismatchCode}`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const mismatchBody = await mismatchResponse.text();
+
+        assert.equal(mismatchResponse.status, 200);
+        assert.match(mismatchBody, /This browser no longer matches the current device secret cycle. Manual recovery may be required./);
+        assert.match(mismatchBody, /Lifecycle state: Authentication mismatch/);
+
+        const revokedResponse = await fetch(`${baseUrl}/admin/devices/${revokedCode}`, {
+          headers: {
+            Cookie: adminCookie
+          }
+        });
+        const revokedBody = await revokedResponse.text();
+
+        assert.equal(revokedResponse.status, 200);
+        assert.match(revokedBody, /This device access has been revoked and requires explicit reactivation./);
+      });
+    });
+  } finally {
+    await removeIfExists(mismatchDeviceFilePath);
+    await removeIfExists(mismatchDeviceAuthFilePath);
+    await removeIfExists(revokedDeviceFilePath);
+    await removeIfExists(revokedDeviceAuthFilePath);
   }
 });
 
@@ -1602,7 +1683,7 @@ test("admin device detail activate action selects the requested client and updat
         assert.match(body, /Official Client/);
         assert.match(body, /BrowserB\/1\.0/);
         assert.match(body, /admin-device-status-pill--fresh">Active<\/span>/);
-        assert.match(body, /Another client is currently active\./);
+        assert.match(body, /Another browser is currently the official active client for this device\./);
         assert.doesNotMatch(body, /name="clientId" value="client-b"/);
       });
     });
