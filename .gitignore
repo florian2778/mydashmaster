@@ -40,3 +40,6 @@ build/
 
 # Coverage
 coverage/
+
+# Generated build/version metadata
+src/generated/version.json

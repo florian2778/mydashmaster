@@ -1,3 +1,10 @@
     </main>
+    <% if (typeof appVersion !== "undefined" && appVersion && appVersion.displayVersion) { %>
+      <footer class="site-footer">
+        <div class="container">
+          <span>Version <code><%= appVersion.displayVersion %></code></span>
+        </div>
+      </footer>
+    <% } %>
   </body>
 </html>

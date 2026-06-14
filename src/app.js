@@ -9,6 +9,7 @@ const homeRoutes = require("./routes/home");
 const adminRoutes = require("./routes/admin");
 const deviceApiRoutes = require("./routes/device-api");
 const deviceRoutes = require("./routes/device");
+const { appVersion } = require("./version");
 
 const app = express();
 const defaultDevicePollIntervalMs = 10000;
@@ -22,6 +23,7 @@ app.locals.devicePollIntervalMs =
   configuredDevicePollIntervalMs > 0
     ? configuredDevicePollIntervalMs
     : defaultDevicePollIntervalMs;
+app.locals.versionInfo = appVersion;
 
 // Production deployment assumes one direct reverse proxy hop, e.g. Traefik.
 app.set("trust proxy", 1);
@@ -34,12 +36,16 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.use((req, res, next) => {
   Object.assign(res.locals, adminAuthViewModel(req));
-  res.locals.appRevision = process.env.APP_REVISION || null;
+  res.locals.appVersion = app.locals.versionInfo;
+  res.locals.appRevision = app.locals.versionInfo.revision || null;
   next();
 });
 
 app.use("/", homeRoutes);
 app.use("/admin", requireAdminAuth, adminRoutes);
+app.get("/api/version", (req, res) => {
+  res.json(app.locals.versionInfo);
+});
 app.use("/api/device", deviceApiRoutes);
 app.use("/d", deviceRoutes);
 
