@@ -1,4 +1,5 @@
 {
   "deviceCode": "demo-device",
-  "status": "approved"
+  "status": "approved",
+  "layoutId": "layout-1"
 }

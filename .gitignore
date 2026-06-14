@@ -1,9 +1,42 @@
+# Dependencies
 node_modules/
 
+# Environment
+.env
+.env.*
+
+# Runtime data
 data/device-auth/
 data/users/
 
+# User-created devices
 data/devices/*.json
-!data/devices/205s5kat.json
+
+# User-created layouts
+data/layouts/*.json
+
+# Keep demo content in Git
 !data/devices/demo-device.json
 !data/devices/demo-device-no2.json
+
+# Optional: Demo layouts
+!data/layouts/demo-layout.json
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs / Editors
+.vscode/
+.idea/
+
+# Build artifacts
+dist/
+build/
+
+# Coverage
+coverage/
