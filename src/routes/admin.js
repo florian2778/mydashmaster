@@ -32,6 +32,14 @@ const {
   writeLayout
 } = require("../storage/json-store");
 const { validateLayout } = require("../storage/validators");
+const {
+  addAllowedDevice,
+  addAllowedLayout,
+  ApiKeyStoreError,
+  listApiKeys,
+  removeAllowedDevice,
+  removeAllowedLayout
+} = require("../api/api-key-store");
 const { logLifecycleEvent } = require("../utils/lifecycle-log");
 
 const router = express.Router();
@@ -476,6 +484,10 @@ async function buildDeviceDetailViewModel(device, deviceAuth, layouts, options =
 
   return {
     actionErrorMessage: options.actionErrorMessage || null,
+    apiAccess: await buildApiAccessViewModel(device.deviceCode, "allowedDevices", {
+      errorMessage: options.apiAccessErrorMessage || null,
+      successMessage: options.apiAccessSuccessMessage || null
+    }),
     assignableLayouts,
     canActivateClients: device.status !== "revoked",
     device: {
@@ -597,6 +609,75 @@ function buildLayoutUsageDevices(devices, layoutId) {
     }));
 }
 
+function getApiAccessErrorMessage(error) {
+  if (!(error instanceof ApiKeyStoreError)) {
+    return "API access could not be updated.";
+  }
+
+  if (error.code === "api_key_name_required") {
+    return "Select an API key before saving.";
+  }
+
+  if (error.code === "api_key_name_unknown") {
+    return "Unknown API key name. Check data/apikeys/*.json.";
+  }
+
+  if (error.code === "api_key_config_write_failed") {
+    return "API key file could not be written. Check filesystem permissions.";
+  }
+
+  if (error.code === "api_key_conflict") {
+    return "API key configuration contains duplicate secrets. Fix data/apikeys/*.json before changing access.";
+  }
+
+  if (error.code === "api_key_config_invalid") {
+    return "API key configuration is invalid. Fix data/apikeys/*.json before changing access.";
+  }
+
+  return error.message || "API access could not be updated.";
+}
+
+async function buildApiAccessViewModel(resourceKey, listField, options = {}) {
+  const result = await listApiKeys();
+
+  if (result.status !== "ok") {
+    return {
+      assignedApiKeys: [],
+      availableApiKeys: [],
+      configErrorMessage:
+        result.status === "conflict"
+          ? "API key configuration contains duplicate secrets. Fix data/apikeys/*.json before changing access."
+          : "API key configuration is invalid. Fix data/apikeys/*.json before changing access.",
+      errorMessage: options.errorMessage || null,
+      successMessage: options.successMessage || null
+    };
+  }
+
+  const sortedKeys = result.keys
+    .slice()
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const assignedApiKeys = sortedKeys.filter((apiKey) =>
+    Array.isArray(apiKey[listField]) && apiKey[listField].includes(resourceKey)
+  );
+  const assignedNames = new Set(assignedApiKeys.map((apiKey) => apiKey.name));
+
+  return {
+    assignedApiKeys: assignedApiKeys.map((apiKey) => ({
+      mode: apiKey.mode,
+      name: apiKey.name
+    })),
+    availableApiKeys: sortedKeys
+      .filter((apiKey) => !assignedNames.has(apiKey.name))
+      .map((apiKey) => ({
+        mode: apiKey.mode,
+        name: apiKey.name
+      })),
+    configErrorMessage: null,
+    errorMessage: options.errorMessage || null,
+    successMessage: options.successMessage || null
+  };
+}
+
 function getReadableLayoutJson(layoutRecord) {
   if (!layoutRecord) {
     return "";
@@ -611,6 +692,8 @@ function getReadableLayoutJson(layoutRecord) {
 
 async function renderLayoutDetailPage(res, layoutId, options = {}) {
   const {
+    apiAccessErrorMessage = null,
+    apiAccessSuccessMessage = null,
     editMode = false,
     descriptionValue = null,
     draftResult = null,
@@ -634,6 +717,10 @@ async function renderLayoutDetailPage(res, layoutId, options = {}) {
   const status = draftResult?.status || layoutRecord.status;
 
   return res.status(httpStatus).render("pages/admin-layout-detail", {
+    apiAccess: await buildApiAccessViewModel(layoutRecord.layoutId, "allowedLayouts", {
+      errorMessage: apiAccessErrorMessage,
+      successMessage: apiAccessSuccessMessage
+    }),
     draftJsonContent:
       draftResult?.jsonContent || getReadableLayoutJson(layoutRecord),
     descriptionValue:
@@ -676,7 +763,12 @@ function buildAbsoluteDeviceUrl(req, deviceCode) {
 }
 
 async function renderDeviceDetailPage(req, res, deviceCode, options = {}) {
-  const { actionErrorMessage = null, httpStatus = 200 } = options;
+  const {
+    actionErrorMessage = null,
+    apiAccessErrorMessage = null,
+    apiAccessSuccessMessage = null,
+    httpStatus = 200
+  } = options;
   const [devices, layouts] = await Promise.all([listDevices(), listLayouts()]);
   const device = devices.find((entry) => entry.deviceCode === deviceCode);
 
@@ -697,6 +789,8 @@ async function renderDeviceDetailPage(req, res, deviceCode, options = {}) {
     {
       ...(await buildDeviceDetailViewModel(device, deviceAuth, layouts, {
         actionErrorMessage,
+        apiAccessErrorMessage,
+        apiAccessSuccessMessage,
         publicDeviceUrlAbsolute
       })),
       detailPollIntervalMs: 10000
@@ -809,6 +903,53 @@ router.get("/layouts/:layoutId", async (req, res, next) => {
 
     await renderLayoutDetailPage(res, layoutId, {
       editMode
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/layouts/:layoutId/api-access", async (req, res, next) => {
+  try {
+    const { layoutId } = req.params;
+    const layoutRecord = await readLayoutRecord(layoutId);
+
+    if (!layoutRecord) {
+      return res.status(404).render("pages/admin-layout-not-found", {
+        heading: "Unknown layout",
+        layoutId,
+        pageTitle: "Unknown layout"
+      });
+    }
+
+    const apiKeyName =
+      typeof req.body?.apiKeyName === "string" ? req.body.apiKeyName.trim() : "";
+    const intent = typeof req.body?.intent === "string" ? req.body.intent : "";
+
+    try {
+      if (intent === "add") {
+        await addAllowedLayout(apiKeyName, layoutId);
+      } else if (intent === "remove") {
+        await removeAllowedLayout(apiKeyName, layoutId);
+      } else {
+        throw new ApiKeyStoreError(
+          "api_key_action_invalid",
+          "Select a valid API access action."
+        );
+      }
+    } catch (error) {
+      if (error instanceof ApiKeyStoreError) {
+        return renderLayoutDetailPage(res, layoutId, {
+          apiAccessErrorMessage: getApiAccessErrorMessage(error),
+          httpStatus: 400
+        });
+      }
+
+      throw error;
+    }
+
+    return renderLayoutDetailPage(res, layoutId, {
+      apiAccessSuccessMessage: "API access updated."
     });
   } catch (error) {
     next(error);
@@ -946,6 +1087,52 @@ router.get("/devices/:deviceCode", async (req, res, next) => {
     const { deviceCode } = req.params;
 
     await renderDeviceDetailPage(req, res, deviceCode);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/devices/:deviceCode/api-access", async (req, res, next) => {
+  try {
+    const { deviceCode } = req.params;
+    const device = await readDevice(deviceCode);
+
+    if (!device) {
+      return res.status(404).render("pages/device-unknown", {
+        pageTitle: "Unknown device",
+        deviceCode
+      });
+    }
+
+    const apiKeyName =
+      typeof req.body?.apiKeyName === "string" ? req.body.apiKeyName.trim() : "";
+    const intent = typeof req.body?.intent === "string" ? req.body.intent : "";
+
+    try {
+      if (intent === "add") {
+        await addAllowedDevice(apiKeyName, deviceCode);
+      } else if (intent === "remove") {
+        await removeAllowedDevice(apiKeyName, deviceCode);
+      } else {
+        throw new ApiKeyStoreError(
+          "api_key_action_invalid",
+          "Select a valid API access action."
+        );
+      }
+    } catch (error) {
+      if (error instanceof ApiKeyStoreError) {
+        return renderDeviceDetailPage(req, res, deviceCode, {
+          apiAccessErrorMessage: getApiAccessErrorMessage(error),
+          httpStatus: 400
+        });
+      }
+
+      throw error;
+    }
+
+    return renderDeviceDetailPage(req, res, deviceCode, {
+      apiAccessSuccessMessage: "API access updated."
+    });
   } catch (error) {
     next(error);
   }

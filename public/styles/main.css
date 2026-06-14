@@ -1186,6 +1186,54 @@ body.device-page .layout-node--box {
   margin: 0;
 }
 
+.admin-form-success {
+  background: #ecfdf3;
+  border: 1px solid #b7ebc6;
+  border-radius: 10px;
+  color: #166534;
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.admin-api-access-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.admin-api-access-card {
+  align-items: center;
+  border: 1px solid #d8e1ea;
+  border-radius: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.85rem;
+}
+
+.admin-api-access-card div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.admin-api-access-card span {
+  color: #52606d;
+  font-size: 0.9rem;
+}
+
+.admin-api-access-form {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.admin-api-access-form label {
+  display: grid;
+  flex: 1 1 16rem;
+  gap: 0.3rem;
+}
+
 .admin-device-detail-summary {
   color: #52606d;
   display: flex;

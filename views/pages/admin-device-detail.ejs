@@ -69,6 +69,62 @@
     </div>
   </section>
 
+  <section class="admin-layout-detail-section admin-api-access-section">
+    <div class="admin-layout-detail-section-head">
+      <h2>API Access</h2>
+    </div>
+    <p class="admin-layout-detail-empty">Manage which existing API keys may access this device. Secret key values are never shown here.</p>
+
+    <% if (apiAccess.configErrorMessage) { %>
+      <p class="admin-form-error"><%= apiAccess.configErrorMessage %></p>
+    <% } %>
+    <% if (apiAccess.errorMessage) { %>
+      <p class="admin-form-error"><%= apiAccess.errorMessage %></p>
+    <% } %>
+    <% if (apiAccess.successMessage) { %>
+      <p class="admin-form-success"><%= apiAccess.successMessage %></p>
+    <% } %>
+
+    <% if (apiAccess.assignedApiKeys.length === 0) { %>
+      <p class="admin-layout-detail-empty">No API key currently has access to this device.</p>
+    <% } else { %>
+      <div class="admin-api-access-list">
+        <% apiAccess.assignedApiKeys.forEach((apiKey) => { %>
+          <article class="admin-api-access-card">
+            <div>
+              <strong><%= apiKey.name %></strong>
+              <span><%= apiKey.mode %></span>
+            </div>
+            <form action="/admin/devices/<%= encodeURIComponent(device.deviceCode) %>/api-access" method="post">
+              <input type="hidden" name="intent" value="remove">
+              <input type="hidden" name="apiKeyName" value="<%= apiKey.name %>">
+              <button class="admin-action-button admin-action-button--secondary" type="submit">Remove</button>
+            </form>
+          </article>
+        <% }) %>
+      </div>
+    <% } %>
+
+    <% if (!apiAccess.configErrorMessage) { %>
+      <form class="admin-api-access-form" action="/admin/devices/<%= encodeURIComponent(device.deviceCode) %>/api-access" method="post">
+        <input type="hidden" name="intent" value="add">
+        <label>
+          <span>Add API key</span>
+          <select name="apiKeyName" <%= apiAccess.availableApiKeys.length === 0 ? "disabled" : "" %>>
+            <% if (apiAccess.availableApiKeys.length === 0) { %>
+              <option value="">No available API keys</option>
+            <% } else { %>
+              <% apiAccess.availableApiKeys.forEach((apiKey) => { %>
+                <option value="<%= apiKey.name %>"><%= apiKey.name %> (<%= apiKey.mode %>)</option>
+              <% }) %>
+            <% } %>
+          </select>
+        </label>
+        <button class="admin-action-button" type="submit" <%= apiAccess.availableApiKeys.length === 0 ? "disabled" : "" %>>Add</button>
+      </form>
+    <% } %>
+  </section>
+
   <section class="admin-layout-detail-section">
     <div class="admin-layout-detail-section-head">
       <h2>Official Client</h2>

@@ -7,6 +7,15 @@ const VALID_MODES = new Set(["readonly", "control"]);
 
 let cachedApiKeyConfig = null;
 
+class ApiKeyStoreError extends Error {
+  constructor(code, message, details = {}) {
+    super(message);
+    this.name = "ApiKeyStoreError";
+    this.code = code;
+    this.details = details;
+  }
+}
+
 function createConfigError(code, message, details = {}) {
   return {
     code,
@@ -103,6 +112,15 @@ async function readApiKeyFile(fileName) {
       reason: error.message
     });
   }
+}
+
+async function writeApiKeyFile(fileName, value) {
+  const filePath = path.join(apiKeysDir, fileName);
+  const temporaryPath = filePath + ".tmp-" + process.pid + "-" + Date.now();
+  const content = JSON.stringify(value, null, 2) + "\n";
+
+  await fs.writeFile(temporaryPath, content, "utf8");
+  await fs.rename(temporaryPath, filePath);
 }
 
 async function loadApiKeyConfig() {
@@ -224,6 +242,181 @@ function clearApiKeyConfigCache() {
   cachedApiKeyConfig = null;
 }
 
+function withoutSecret(apiKey) {
+  return {
+    allowedDevices: apiKey.allowedDevices,
+    allowedLayouts: apiKey.allowedLayouts,
+    fileName: apiKey.fileName,
+    mode: apiKey.mode,
+    name: apiKey.name
+  };
+}
+
+async function listApiKeys() {
+  const config = await getApiKeyConfig();
+
+  if (config.errors.length > 0) {
+    return {
+      errors: config.errors,
+      keys: [],
+      status: config.errors.some((error) => error.code === "api_key_conflict")
+        ? "conflict"
+        : "config_invalid"
+    };
+  }
+
+  return {
+    errors: [],
+    keys: config.keys.map(withoutSecret),
+    status: "ok"
+  };
+}
+
+function throwConfigError(config) {
+  const hasSecretConflict = config.errors.some(
+    (error) => error.code === "api_key_conflict"
+  );
+
+  throw new ApiKeyStoreError(
+    hasSecretConflict ? "api_key_conflict" : "api_key_config_invalid",
+    hasSecretConflict
+      ? "API key configuration contains duplicate secrets."
+      : "API key configuration is invalid.",
+    { errors: config.errors }
+  );
+}
+
+async function findApiKeyRecordByName(apiKeyName) {
+  const normalizedName = typeof apiKeyName === "string" ? apiKeyName.trim() : "";
+
+  if (!normalizedName) {
+    throw new ApiKeyStoreError(
+      "api_key_name_required",
+      "Select an API key before saving."
+    );
+  }
+
+  const config = await getApiKeyConfig();
+
+  if (config.errors.length > 0) {
+    throwConfigError(config);
+  }
+
+  const matches = config.keys.filter((entry) => entry.name === normalizedName);
+
+  if (matches.length === 0) {
+    throw new ApiKeyStoreError(
+      "api_key_name_unknown",
+      "Unknown API key name.",
+      { name: normalizedName }
+    );
+  }
+
+  if (matches.length > 1) {
+    throw new ApiKeyStoreError(
+      "api_key_config_invalid",
+      "API key name is duplicated.",
+      { name: normalizedName }
+    );
+  }
+
+  return matches[0];
+}
+
+async function updateAllowedList(apiKeyName, listField, resourceKey, operation) {
+  const normalizedResourceKey =
+    typeof resourceKey === "string" ? resourceKey.trim() : "";
+
+  if (!normalizedResourceKey) {
+    throw new ApiKeyStoreError(
+      "api_key_resource_required",
+      "A resource key is required."
+    );
+  }
+
+  const apiKeyRecord = await findApiKeyRecordByName(apiKeyName);
+  let parsed;
+
+  try {
+    parsed = await readApiKeyFile(apiKeyRecord.fileName);
+  } catch (error) {
+    throw new ApiKeyStoreError(
+      error?.code || "api_key_config_invalid",
+      "API key file cannot be read.",
+      { fileName: apiKeyRecord.fileName }
+    );
+  }
+
+  const validation = validateApiKeyRecord(parsed, apiKeyRecord.fileName);
+
+  if (validation.errors.length > 0) {
+    throw new ApiKeyStoreError(
+      "api_key_config_invalid",
+      "API key file is invalid.",
+      {
+        errors: validation.errors,
+        fileName: apiKeyRecord.fileName
+      }
+    );
+  }
+
+  const existingValues = Array.isArray(parsed[listField])
+    ? parsed[listField].filter((entry) => typeof entry === "string")
+    : [];
+  const nextValues =
+    operation === "add"
+      ? Array.from(new Set([...existingValues, normalizedResourceKey]))
+      : existingValues.filter((entry) => entry !== normalizedResourceKey);
+
+  const nextRecord = {
+    ...parsed,
+    [listField]: nextValues
+  };
+  const nextValidation = validateApiKeyRecord(nextRecord, apiKeyRecord.fileName);
+
+  if (nextValidation.errors.length > 0) {
+    throw new ApiKeyStoreError(
+      "api_key_config_invalid",
+      "API key file would become invalid.",
+      {
+        errors: nextValidation.errors,
+        fileName: apiKeyRecord.fileName
+      }
+    );
+  }
+
+  try {
+    await writeApiKeyFile(apiKeyRecord.fileName, nextRecord);
+  } catch (error) {
+    throw new ApiKeyStoreError(
+      "api_key_config_write_failed",
+      "API key file cannot be written.",
+      {
+        fileName: apiKeyRecord.fileName,
+        reason: error.message
+      }
+    );
+  } finally {
+    clearApiKeyConfigCache();
+  }
+}
+
+async function addAllowedDevice(apiKeyName, deviceKey) {
+  await updateAllowedList(apiKeyName, "allowedDevices", deviceKey, "add");
+}
+
+async function removeAllowedDevice(apiKeyName, deviceKey) {
+  await updateAllowedList(apiKeyName, "allowedDevices", deviceKey, "remove");
+}
+
+async function addAllowedLayout(apiKeyName, layoutKey) {
+  await updateAllowedList(apiKeyName, "allowedLayouts", layoutKey, "add");
+}
+
+async function removeAllowedLayout(apiKeyName, layoutKey) {
+  await updateAllowedList(apiKeyName, "allowedLayouts", layoutKey, "remove");
+}
+
 async function findApiKeyBySecret(secret) {
   const config = await getApiKeyConfig();
 
@@ -247,8 +440,14 @@ async function findApiKeyBySecret(secret) {
 }
 
 module.exports = {
+  addAllowedDevice,
+  addAllowedLayout,
+  ApiKeyStoreError,
   apiKeysDir,
   clearApiKeyConfigCache,
   findApiKeyBySecret,
-  loadApiKeyConfig
+  listApiKeys,
+  loadApiKeyConfig,
+  removeAllowedDevice,
+  removeAllowedLayout
 };
