@@ -9,6 +9,7 @@ const homeRoutes = require("./routes/home");
 const adminRoutes = require("./routes/admin");
 const deviceApiRoutes = require("./routes/device-api");
 const deviceRoutes = require("./routes/device");
+const simpleApiRoutes = require("./routes/simple-api");
 const { appVersion } = require("./version");
 
 const app = express();
@@ -46,6 +47,7 @@ app.use("/admin", requireAdminAuth, adminRoutes);
 app.get("/api/version", (req, res) => {
   res.json(app.locals.versionInfo);
 });
+app.use("/api", simpleApiRoutes);
 app.use("/api/device", deviceApiRoutes);
 app.use("/d", deviceRoutes);
 

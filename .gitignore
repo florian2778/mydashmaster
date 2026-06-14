@@ -7,6 +7,7 @@ node_modules/
 
 # Runtime data
 data/device-auth/
+data/apikeys/
 data/users/
 
 # User-created devices
