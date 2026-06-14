@@ -129,7 +129,8 @@ async function postAdminForm(baseUrl, adminCookie, url, values) {
       "Content-Type": "application/x-www-form-urlencoded",
       cookie: adminCookie
     },
-    method: "POST"
+    method: "POST",
+    redirect: "manual"
   });
 }
 
@@ -193,8 +194,16 @@ test("admin device API access add/remove updates only API key files", async () =
         );
         let apiKey = await readApiKeyFile(apiKeyFileName);
 
-        assert.equal(addResponse.status, 200);
-        assert.equal(duplicateAddResponse.status, 200);
+        assert.equal(addResponse.status, 303);
+        assert.equal(
+          addResponse.headers.get("location"),
+          "/admin/devices/admin-api-device?apiAccess=updated"
+        );
+        assert.equal(duplicateAddResponse.status, 303);
+        assert.equal(
+          duplicateAddResponse.headers.get("location"),
+          "/admin/devices/admin-api-device?apiAccess=updated"
+        );
         assert.deepEqual(apiKey.allowedDevices, [deviceCode]);
         assert.deepEqual(await readDevice(deviceCode), deviceBefore);
 
@@ -206,7 +215,11 @@ test("admin device API access add/remove updates only API key files", async () =
         );
         apiKey = await readApiKeyFile(apiKeyFileName);
 
-        assert.equal(removeResponse.status, 200);
+        assert.equal(removeResponse.status, 303);
+        assert.equal(
+          removeResponse.headers.get("location"),
+          "/admin/devices/admin-api-device?apiAccess=updated"
+        );
         assert.deepEqual(apiKey.allowedDevices, []);
         assert.deepEqual(await readDevice(deviceCode), deviceBefore);
       });
@@ -253,8 +266,16 @@ test("admin layout API access add/remove updates only API key files", async () =
         );
         let apiKey = await readApiKeyFile(apiKeyFileName);
 
-        assert.equal(addResponse.status, 200);
-        assert.equal(duplicateAddResponse.status, 200);
+        assert.equal(addResponse.status, 303);
+        assert.equal(
+          addResponse.headers.get("location"),
+          "/admin/layouts/admin-api-layout?apiAccess=updated"
+        );
+        assert.equal(duplicateAddResponse.status, 303);
+        assert.equal(
+          duplicateAddResponse.headers.get("location"),
+          "/admin/layouts/admin-api-layout?apiAccess=updated"
+        );
         assert.deepEqual(apiKey.allowedLayouts, [layoutId]);
         assert.deepEqual(await readLayout(layoutId), layoutBefore);
 
@@ -266,7 +287,11 @@ test("admin layout API access add/remove updates only API key files", async () =
         );
         apiKey = await readApiKeyFile(apiKeyFileName);
 
-        assert.equal(removeResponse.status, 200);
+        assert.equal(removeResponse.status, 303);
+        assert.equal(
+          removeResponse.headers.get("location"),
+          "/admin/layouts/admin-api-layout?apiAccess=updated"
+        );
         assert.deepEqual(apiKey.allowedLayouts, []);
         assert.deepEqual(await readLayout(layoutId), layoutBefore);
       });

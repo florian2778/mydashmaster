@@ -751,6 +751,10 @@ function renderLoginPage(res, options = {}) {
   });
 }
 
+function getApiAccessSuccessMessage(req) {
+  return req.query?.apiAccess === "updated" ? "API access updated." : null;
+}
+
 function buildAbsoluteDeviceUrl(req, deviceCode) {
   const protocol = req.protocol || "http";
   const host = req.get("host");
@@ -902,6 +906,7 @@ router.get("/layouts/:layoutId", async (req, res, next) => {
     const editMode = req.query.mode === "edit";
 
     await renderLayoutDetailPage(res, layoutId, {
+      apiAccessSuccessMessage: getApiAccessSuccessMessage(req),
       editMode
     });
   } catch (error) {
@@ -948,9 +953,10 @@ router.post("/layouts/:layoutId/api-access", async (req, res, next) => {
       throw error;
     }
 
-    return renderLayoutDetailPage(res, layoutId, {
-      apiAccessSuccessMessage: "API access updated."
-    });
+    return res.redirect(
+      303,
+      `/admin/layouts/${encodeURIComponent(layoutId)}?apiAccess=updated`
+    );
   } catch (error) {
     next(error);
   }
@@ -1086,7 +1092,9 @@ router.get("/devices/:deviceCode", async (req, res, next) => {
   try {
     const { deviceCode } = req.params;
 
-    await renderDeviceDetailPage(req, res, deviceCode);
+    await renderDeviceDetailPage(req, res, deviceCode, {
+      apiAccessSuccessMessage: getApiAccessSuccessMessage(req)
+    });
   } catch (error) {
     next(error);
   }
@@ -1130,9 +1138,10 @@ router.post("/devices/:deviceCode/api-access", async (req, res, next) => {
       throw error;
     }
 
-    return renderDeviceDetailPage(req, res, deviceCode, {
-      apiAccessSuccessMessage: "API access updated."
-    });
+    return res.redirect(
+      303,
+      `/admin/devices/${encodeURIComponent(deviceCode)}?apiAccess=updated`
+    );
   } catch (error) {
     next(error);
   }
